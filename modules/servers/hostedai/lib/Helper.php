@@ -271,7 +271,7 @@ class Helper
                 // $end_date = '2025-09-30';   // Match UI end date
             }
 
-            $endPoint = "team-billing/shared-storage/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "/" . $regionId;
+            $endPoint = "team-billing/shared-storage/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?region_id=" . urlencode($regionId) . "&timezone=UTC";
 
             $curlResponse = $this->curlCall("GET", '', "getTeamSharedStorageBilling", $endPoint);
 
@@ -302,7 +302,7 @@ class Helper
                 // $end_date = '2025-09-30';   // Match UI end date
             }
 
-            $endPoint = "team-billing/gpuaas-pool/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "/" . $regionId;
+            $endPoint = "team-billing/gpuaas-pool/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?region_id=" . urlencode($regionId) . "&timezone=UTC";
 
             $curlResponse = $this->curlCall("GET", '', "getTeamGpuaasPoolBilling", $endPoint);
 
