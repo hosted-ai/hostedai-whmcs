@@ -79,38 +79,53 @@ try {
                         logActivity("No instances found for workspace: {$workspaceName}");
                         continue;
                     }
-                
+
                     foreach ($workspace->instances as $instanceId => $instanceData) {
-                        $instanceArray = (array)$instanceData;
-                        $monthData = reset($instanceArray);
-                
-                        // Enhanced cost breakdown with new fields
-                        $cpu = number_format($monthData->Cost_Of_CPU ?? 0, 2);
-                        $ram = number_format($monthData->Cost_Of_RAM ?? 0, 2);
-                        $disk = number_format($monthData->Cost_Of_Disk_Storage ?? 0, 2);
-                        $gpu = number_format($monthData->Cost_Of_GPU ?? 0, 2);
-                        $networkIn = number_format($monthData->Cost_Of_NetworkIn ?? 0, 2);
-                        $networkOut = number_format($monthData->Cost_Of_NetworkOut ?? 0, 2);
-                        $publicIP = number_format($monthData->Cost_of_Public_IP ?? 0, 2);
-                        $instanceTotal = number_format($monthData->total_cost, 2);
-                
+                        $instanceName = $instanceData->instance_name ?? $instanceId;
+                        $instanceTotalCost = floatval($instanceData->total_cost ?? 0);
+
+                        // Aggregate costs across all intervals (months)
+                        $cpuTotal = 0; $ramTotal = 0; $diskTotal = 0; $gpuTotal = 0;
+                        $subscriptionTotal = 0; $tflopsTotal = 0; $vramTotal = 0;
+
+                        if (isset($instanceData->intervals)) {
+                            foreach ($instanceData->intervals as $month => $intervalData) {
+                                $res = $intervalData->Resources ?? new \stdClass();
+                                $cpuTotal += floatval($res->CPU->cost ?? 0);
+                                $ramTotal += floatval($res->RAM->cost ?? 0);
+                                $diskTotal += floatval($res->{'Ephemeral Storage'}->cost ?? 0);
+                                $gpuTotal += floatval($res->GPU->cost ?? 0);
+                                $subscriptionTotal += floatval($res->{'Subscription Rate'}->cost ?? 0);
+                                $tflopsTotal += floatval($res->TFlops->cost ?? 0);
+                                $vramTotal += floatval($res->vRAM->cost ?? 0);
+                            }
+                        }
+
+                        $cpu = number_format($cpuTotal, 2);
+                        $ram = number_format($ramTotal, 2);
+                        $disk = number_format($diskTotal, 2);
+                        $gpu = number_format($gpuTotal, 2);
+                        $subscription = number_format($subscriptionTotal, 2);
+                        $tflops = number_format($tflopsTotal, 2);
+                        $vram = number_format($vramTotal, 2);
+
                         $description = <<<DESC
                                         Workspace: {$workspaceName}
-                                        Instance ID: {$instanceId}
+                                        Instance: {$instanceName} ({$instanceId})
                                         CPU ………………………………………………………… \$ {$cpu}
                                         RAM ………………………………………………………… \$ {$ram}
-                                        Disk Storage ………………………………………… \$ {$disk}
+                                        Ephemeral Storage ……………………………… \$ {$disk}
                                         GPU ………………………………………………………… \$ {$gpu}
-                                        Network In ……………………………………………… \$ {$networkIn}
-                                        Network Out …………………………………………… \$ {$networkOut}
-                                        Public IP ……………………………………………… \$ {$publicIP}
+                                        Subscription Rate ……………………………… \$ {$subscription}
+                                        TFlops ……………………………………………………… \$ {$tflops}
+                                        vRAM ………………………………………………………… \$ {$vram}
                                         DESC;
-                
+
                         $invoiceItems["itemdescription{$itemCount}"] = $description;
-                        $invoiceItems["itemamount{$itemCount}"] = $monthData->total_cost; // Use raw float for invoice
+                        $invoiceItems["itemamount{$itemCount}"] = $instanceTotalCost;
                         $invoiceItems["itemtaxed{$itemCount}"] = true;
-                
-                        $totalWithoutTax += $monthData->total_cost;
+
+                        $totalWithoutTax += $instanceTotalCost;
                         $itemCount++;
                     }
 

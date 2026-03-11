@@ -76,90 +76,83 @@ function hostedai_ConfigOptions(array $params)
     $helper = new Helper($serverParams);
 
     /** Get the API to fetch the pricing policy items */
-    $getPricingPolicy = $helper->getPolicyItems('pricing-policy');
-    $pricingOptions = [];
-    if(isset($getPricingPolicy))
-    {
-        $pricingOptions[] = 'Select Option';
-        foreach ($getPricingPolicy['result'] as $key => $value) {
-            $pricingOptions[$value->policy->id] = $value->policy->name;
+    $pricingOptions = ['Select Option'];
+    try {
+        $getPricingPolicy = $helper->getPolicyItems('pricing-policy');
+        if (isset($getPricingPolicy['result']) && is_array($getPricingPolicy['result'])) {
+            foreach ($getPricingPolicy['result'] as $value) {
+                if (isset($value->policy->id)) {
+                    $pricingOptions[$value->policy->id] = $value->policy->name;
+                }
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load pricing policies: ' . $e->getMessage());
     }
 
     /** Get the API to fetch the resource policy items */
-    $getResourcePolicy = $helper->getPolicyItems('resource-policy');
-    $resourceOptions = [];
-    if(isset($getResourcePolicy))
-    {
-        $resourceOptions[] = 'Select Option';
-        foreach ($getResourcePolicy['result'] as $key => $value) {
-            $resourceOptions[$value->id] = $value->name;
+    $resourceOptions = ['Select Option'];
+    try {
+        $getResourcePolicy = $helper->getPolicyItems('resource-policy');
+        if (isset($getResourcePolicy['result']) && is_array($getResourcePolicy['result'])) {
+            foreach ($getResourcePolicy['result'] as $value) {
+                $resourceOptions[$value->id] = $value->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load resource policies: ' . $e->getMessage());
     }
 
-     /** Get the API to fetch the Service policy items */
-    $getServicePolicy = $helper->getPolicyItems('policy/service');
-    $serviceOptions = [];
-    if (isset($getServicePolicy['result']) && is_array($getServicePolicy['result'])) {
-
-        $serviceOptions[] = 'Select Option';
-    
-        foreach ($getServicePolicy['result'] as $policy) 
-        {
-            $serviceOptions[$policy->id] = $policy->name;
-            // if (isset($policy->objects) && is_array($policy->objects)) {
-            //     foreach ($policy->objects as $object) {
-            //         $serviceOptions[$object->id] = $object->name;
-            //     }
-            // }
+    /** Get the API to fetch the Service policy items */
+    $serviceOptions = ['Select Option'];
+    try {
+        $getServicePolicy = $helper->getPolicyItems('policy/service');
+        if (isset($getServicePolicy['result']) && is_array($getServicePolicy['result'])) {
+            foreach ($getServicePolicy['result'] as $policy) {
+                $serviceOptions[$policy->id] = $policy->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load service policies: ' . $e->getMessage());
     }
 
     /** Get the API to fetch the Instance policy items */
-    $getInstancePolicy = $helper->getPolicyItems('policy/instance-type');
-    $instanceOptions = [];
-    if (isset($getInstancePolicy['result']) && is_array($getInstancePolicy['result'])) 
-    {
-
-        $instanceOptions[] = 'Select Option';
-        foreach ($getInstancePolicy['result'] as $policy) {
-            $instanceOptions[$policy->id] = $policy->name;
-            // if (isset($policy->objects) && is_array($policy->objects)) {
-            //     foreach ($policy->objects as $object) {
-            //         $instanceOptions[$object->id] = $object->name;
-            //     }
-            // }
+    $instanceOptions = ['Select Option'];
+    try {
+        $getInstancePolicy = $helper->getPolicyItems('policy/instance-type');
+        if (isset($getInstancePolicy['result']) && is_array($getInstancePolicy['result'])) {
+            foreach ($getInstancePolicy['result'] as $policy) {
+                $instanceOptions[$policy->id] = $policy->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load instance type policies: ' . $e->getMessage());
     }
 
     /** Get the API to fetch the Image policy items */
-    $getImagePolicy = $helper->getPolicyItems('policy/image');
-    $imageOptions = [];
-    if (isset($getImagePolicy['result']) && is_array($getImagePolicy['result'])) 
-    {
-
-        $imageOptions[] = 'Select Option';
-        foreach ($getImagePolicy['result'] as $policy) {
-            $imageOptions[$policy->id] = $policy->name;
-            // if (isset($policy->objects) && is_array($policy->objects)) {
-            //     foreach ($policy->objects as $object) {
-            //         $imageOptions[$object->id] = $object->name;
-            //     }
-            // }
+    $imageOptions = ['Select Option'];
+    try {
+        $getImagePolicy = $helper->getPolicyItems('policy/image');
+        if (isset($getImagePolicy['result']) && is_array($getImagePolicy['result'])) {
+            foreach ($getImagePolicy['result'] as $policy) {
+                $imageOptions[$policy->id] = $policy->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load image policies: ' . $e->getMessage());
     }
 
     /** Get the API to fetch the Role items */
-    $getRoleData = $helper->getPolicyItems('roles');
-  
-    $roleOptions = [];
-    if (isset($getRoleData['result'])) 
-    {
-
-        $roleOptions[] = 'Select Option';
-        foreach ($getRoleData['result']->roles as $policy) {
-            $roleOptions[$policy->id] = $policy->label;
+    $roleOptions = ['Select Option'];
+    try {
+        $getRoleData = $helper->getPolicyItems('roles');
+        if (isset($getRoleData['result']->roles)) {
+            foreach ($getRoleData['result']->roles as $policy) {
+                $roleOptions[$policy->id] = $policy->label;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load roles: ' . $e->getMessage());
     }
 
      /** create the custom fields */
