@@ -320,7 +320,7 @@ function hostedai_CreateAccount(array $params)
                     'role' => $roleID,
                 ]
             ],
-            'name' => $name ?? '',
+            'name' => ($name ?? '') . '-' . $serviceId,
             'pricing_policy_id' => $pricingPolicyID ?? '',
             'resource_policy_id' => $resourcePolicyID ?? '',
             'service_policy_id' => $servicePolicyID ?? '',
