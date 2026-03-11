@@ -341,8 +341,8 @@ try {
         $product = Capsule::table('tblproducts')->where('id', $invoice->pid)->first();
     
         if ($invoice_date && $product) {
-            $suspend_days = $product->configoption9;
-            $terminate_days = $product->configoption10;
+            $suspend_days = $product->configoption8;
+            $terminate_days = $product->configoption9;
     
             if ($suspend_days !== null && $terminate_days !== null) {
                 $invoiceDate = new DateTime($invoice_date);

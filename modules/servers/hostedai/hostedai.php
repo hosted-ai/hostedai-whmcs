@@ -142,18 +142,7 @@ function hostedai_ConfigOptions(array $params)
         logActivity('hostedai: Failed to load image policies: ' . $e->getMessage());
     }
 
-    /** Get the API to fetch the Role items */
-    $roleOptions = ['Select Option'];
-    try {
-        $getRoleData = $helper->getPolicyItems('roles');
-        if (isset($getRoleData['result']->roles)) {
-            foreach ($getRoleData['result']->roles as $policy) {
-                $roleOptions[$policy->id] = $policy->label;
-            }
-        }
-    } catch (Exception $e) {
-        logActivity('hostedai: Failed to load roles: ' . $e->getMessage());
-    }
+    // Role is no longer configurable — first user is always Team Admin
 
      /** create the custom fields */
     $customfieldarray = [
@@ -205,13 +194,6 @@ function hostedai_ConfigOptions(array $params)
             'Type' => 'dropdown',
             'Size' => '25',
             'Options' => $imageOptions,
-            'Description' => '',
-        ),
-        'role' => array(
-            'FriendlyName' => 'Role',
-            'Type' => 'dropdown',
-            'Size' => '25',
-            'Options' => $roleOptions,
             'Description' => '',
         ),
         'color' => array(
@@ -309,11 +291,22 @@ function hostedai_CreateAccount(array $params)
         $servicePolicyID =  $params['configoption3'];
         $instancePolicyID =  $params['configoption4'];
         $imagePolicyID =  $params['configoption5'];
-        $roleID =  $params['configoption6'];
-        $color =  $params['configoption7'];
+        $color =  $params['configoption6'];
 
         $email =  $params['clientsdetails']['email'];
         $name =  $params['clientsdetails']['fullname'];
+
+        // First user is always Team Admin — find admin role ID from API
+        $roleID = '';
+        $getRoles = $helper->getPolicyItems('roles');
+        if (isset($getRoles['result']->roles)) {
+            foreach ($getRoles['result']->roles as $role) {
+                if ($role->name === 'team_admin') {
+                    $roleID = $role->id;
+                    break;
+                }
+            }
+        }
 
         $postData = [
             'color' => $color ?? '#414141',
@@ -324,7 +317,7 @@ function hostedai_CreateAccount(array $params)
                 [
                     'email' => $email ?? '',
                     'name' => $name ?? '',
-                    'role' => $roleID ?? '',
+                    'role' => $roleID,
                 ]
             ],
             'name' => $name ?? '',
@@ -552,7 +545,7 @@ function hostedai_AdminServicesTabFields(array $params)
         global $CONFIG;
         global $whmcs;
 
-        $loginURL = !empty($params['configoption8']) ? $params['configoption8'] : '#';
+        $loginURL = !empty($params['configoption7']) ? $params['configoption7'] : '#';
         $helper = new Helper($params);
 
         $assets = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets";
@@ -742,7 +735,7 @@ function hostedai_ClientArea(array $params)
         global $whmcs;
         $helper = new Helper($params);
 
-        $loginURL = !empty($params['configoption8']) ? $params['configoption8'] : '#';
+        $loginURL = !empty($params['configoption7']) ? $params['configoption7'] : '#';
 
         $assets = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets";
 
