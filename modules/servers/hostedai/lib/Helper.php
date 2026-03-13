@@ -84,6 +84,38 @@ class Helper
         }
     }
 
+    /** Invite members to a team with pre-onboarding */
+    public function inviteTeamMembers($teamId, $members)
+    {
+        try {
+            $endPoint = 'team/' . $teamId . '/invite';
+            $curlResponse = $this->curlCall("POST", "inviteTeamMembers", $endPoint, $members);
+            return $curlResponse;
+        } catch (Exception $e) {
+            logActivity('Unable to invite team members, Error: ' . $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
+        }
+    }
+
+    /** Onboard a user (complete registration without email flow) */
+    public function onboardUser($email, $name, $password)
+    {
+        try {
+            $endPoint = 'onboard';
+            $data = [
+                'email' => $email,
+                'name' => $name,
+                'old_password' => $password,
+                'new_password' => $password,
+            ];
+            $curlResponse = $this->curlCall("POST", "onboardUser", $endPoint, $data);
+            return $curlResponse;
+        } catch (Exception $e) {
+            logActivity('Unable to onboard user, Error: ' . $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
+        }
+    }
+
     /** Get the team based on teamID */
     public function getTeamDetail($teamid)
     {
@@ -480,18 +512,22 @@ class Helper
     }
 
     /** Create One Time Login Token */
-    public function createOneTimeLoginToken($userEmail)
+    public function createOneTimeLoginToken($userEmail, $fullData = null)
     {
         try {
             $endPoint = 'create-otl';
-            $data = [
-                'email' => $userEmail,
-                'send_email_invite' => false  // We just want the URL, not to send email
-            ];
+            if ($fullData) {
+                $data = $fullData;
+            } else {
+                $data = [
+                    'email' => $userEmail,
+                    'send_email_invite' => false
+                ];
+            }
             $curlResponse = $this->curlCall("POST", "createOneTimeLoginToken", $endPoint, $data);
             return $curlResponse;
         } catch (Exception $e) {
-            logActivity('Unable to create OTL token, Error: ', $e->getMessage());
+            logActivity('Unable to create OTL token, Error: ' . $e->getMessage());
             return ['httpcode' => 500, 'result' => null];
         }
     }

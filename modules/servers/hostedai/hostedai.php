@@ -318,6 +318,7 @@ function hostedai_CreateAccount(array $params)
                     'email' => $email ?? '',
                     'name' => $name ?? '',
                     'role' => $roleID,
+                    'pre_onboard' => true,
                 ]
             ],
             'name' => ($name ?? '') . '-' . $serviceId,
@@ -339,11 +340,10 @@ function hostedai_CreateAccount(array $params)
 
                 if (isset($getResponse['result']->id)) {
                     $teamId = $getResponse['result']->id;
-                    
+
                     $fields = ["team_id" => $teamId];
                     $helper->insert_hostedai_custom_fields_value($serviceId, $pid, $fields);
-                    
-                    // 
+
                     $billingCycle = $params['model']->billingcycle;
                     if ($billingCycle === 'One Time') {
                         $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert');
