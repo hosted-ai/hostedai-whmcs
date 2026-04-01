@@ -8,12 +8,15 @@ if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
 
+define('HOSTEDAI_MODULE_VERSION', '2.2.0');
+
 function hostedai_MetaData()
 {
     return array(
         'DisplayName' => 'hosted·ai',
-        'APIVersion' => '1.0', // Use API Version 1.1
-        'RequiresServer' => true, // Set true if module requires a server to work
+        'APIVersion' => '1.0',
+        'RequiresServer' => true,
+        'Version' => HOSTEDAI_MODULE_VERSION,
     );
 }
 
@@ -76,91 +79,73 @@ function hostedai_ConfigOptions(array $params)
     $helper = new Helper($serverParams);
 
     /** Get the API to fetch the pricing policy items */
-    $getPricingPolicy = $helper->getPolicyItems('pricing-policy');
-    $pricingOptions = [];
-    if(isset($getPricingPolicy))
-    {
-        $pricingOptions[] = 'Select Option';
-        foreach ($getPricingPolicy['result'] as $key => $value) {
-            $pricingOptions[$value->policy->id] = $value->policy->name;
+    $pricingOptions = ['Select Option'];
+    try {
+        $getPricingPolicy = $helper->getPolicyItems('pricing-policy');
+        if (isset($getPricingPolicy['result']) && is_array($getPricingPolicy['result'])) {
+            foreach ($getPricingPolicy['result'] as $value) {
+                if (isset($value->policy->id)) {
+                    $pricingOptions[$value->policy->id] = $value->policy->name;
+                }
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load pricing policies: ' . $e->getMessage());
     }
 
     /** Get the API to fetch the resource policy items */
-    $getResourcePolicy = $helper->getPolicyItems('resource-policy');
-    $resourceOptions = [];
-    if(isset($getResourcePolicy))
-    {
-        $resourceOptions[] = 'Select Option';
-        foreach ($getResourcePolicy['result'] as $key => $value) {
-            $resourceOptions[$value->id] = $value->name;
+    $resourceOptions = ['Select Option'];
+    try {
+        $getResourcePolicy = $helper->getPolicyItems('resource-policy');
+        if (isset($getResourcePolicy['result']) && is_array($getResourcePolicy['result'])) {
+            foreach ($getResourcePolicy['result'] as $value) {
+                $resourceOptions[$value->id] = $value->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load resource policies: ' . $e->getMessage());
     }
 
-     /** Get the API to fetch the Service policy items */
-    $getServicePolicy = $helper->getPolicyItems('policy/service');
-    $serviceOptions = [];
-    if (isset($getServicePolicy['result']) && is_array($getServicePolicy['result'])) {
-
-        $serviceOptions[] = 'Select Option';
-    
-        foreach ($getServicePolicy['result'] as $policy) 
-        {
-            $serviceOptions[$policy->id] = $policy->name;
-            // if (isset($policy->objects) && is_array($policy->objects)) {
-            //     foreach ($policy->objects as $object) {
-            //         $serviceOptions[$object->id] = $object->name;
-            //     }
-            // }
+    /** Get the API to fetch the Service policy items */
+    $serviceOptions = ['Select Option'];
+    try {
+        $getServicePolicy = $helper->getPolicyItems('policy/service');
+        if (isset($getServicePolicy['result']) && is_array($getServicePolicy['result'])) {
+            foreach ($getServicePolicy['result'] as $policy) {
+                $serviceOptions[$policy->id] = $policy->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load service policies: ' . $e->getMessage());
     }
 
     /** Get the API to fetch the Instance policy items */
-    $getInstancePolicy = $helper->getPolicyItems('policy/instance-type');
-    $instanceOptions = [];
-    if (isset($getInstancePolicy['result']) && is_array($getInstancePolicy['result'])) 
-    {
-
-        $instanceOptions[] = 'Select Option';
-        foreach ($getInstancePolicy['result'] as $policy) {
-            $instanceOptions[$policy->id] = $policy->name;
-            // if (isset($policy->objects) && is_array($policy->objects)) {
-            //     foreach ($policy->objects as $object) {
-            //         $instanceOptions[$object->id] = $object->name;
-            //     }
-            // }
+    $instanceOptions = ['Select Option'];
+    try {
+        $getInstancePolicy = $helper->getPolicyItems('policy/instance-type');
+        if (isset($getInstancePolicy['result']) && is_array($getInstancePolicy['result'])) {
+            foreach ($getInstancePolicy['result'] as $policy) {
+                $instanceOptions[$policy->id] = $policy->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load instance type policies: ' . $e->getMessage());
     }
 
     /** Get the API to fetch the Image policy items */
-    $getImagePolicy = $helper->getPolicyItems('policy/image');
-    $imageOptions = [];
-    if (isset($getImagePolicy['result']) && is_array($getImagePolicy['result'])) 
-    {
-
-        $imageOptions[] = 'Select Option';
-        foreach ($getImagePolicy['result'] as $policy) {
-            $imageOptions[$policy->id] = $policy->name;
-            // if (isset($policy->objects) && is_array($policy->objects)) {
-            //     foreach ($policy->objects as $object) {
-            //         $imageOptions[$object->id] = $object->name;
-            //     }
-            // }
+    $imageOptions = ['Select Option'];
+    try {
+        $getImagePolicy = $helper->getPolicyItems('policy/image');
+        if (isset($getImagePolicy['result']) && is_array($getImagePolicy['result'])) {
+            foreach ($getImagePolicy['result'] as $policy) {
+                $imageOptions[$policy->id] = $policy->name;
+            }
         }
+    } catch (Exception $e) {
+        logActivity('hostedai: Failed to load image policies: ' . $e->getMessage());
     }
 
-    /** Get the API to fetch the Role items */
-    $getRoleData = $helper->getPolicyItems('roles');
-  
-    $roleOptions = [];
-    if (isset($getRoleData['result'])) 
-    {
-
-        $roleOptions[] = 'Select Option';
-        foreach ($getRoleData['result']->roles as $policy) {
-            $roleOptions[$policy->id] = $policy->label;
-        }
-    }
+    // Role is no longer configurable — first user is always Team Admin
 
      /** create the custom fields */
     $customfieldarray = [
@@ -212,13 +197,6 @@ function hostedai_ConfigOptions(array $params)
             'Type' => 'dropdown',
             'Size' => '25',
             'Options' => $imageOptions,
-            'Description' => '',
-        ),
-        'role' => array(
-            'FriendlyName' => 'Role',
-            'Type' => 'dropdown',
-            'Size' => '25',
-            'Options' => $roleOptions,
             'Description' => '',
         ),
         'color' => array(
@@ -316,11 +294,22 @@ function hostedai_CreateAccount(array $params)
         $servicePolicyID =  $params['configoption3'];
         $instancePolicyID =  $params['configoption4'];
         $imagePolicyID =  $params['configoption5'];
-        $roleID =  $params['configoption6'];
-        $color =  $params['configoption7'];
+        $color =  $params['configoption6'];
 
         $email =  $params['clientsdetails']['email'];
         $name =  $params['clientsdetails']['fullname'];
+
+        // First user is always Team Admin — find admin role ID from API
+        $roleID = '';
+        $getRoles = $helper->getPolicyItems('roles');
+        if (isset($getRoles['result']->roles)) {
+            foreach ($getRoles['result']->roles as $role) {
+                if ($role->name === 'team_admin') {
+                    $roleID = $role->id;
+                    break;
+                }
+            }
+        }
 
         $postData = [
             'color' => $color ?? '#414141',
@@ -331,10 +320,11 @@ function hostedai_CreateAccount(array $params)
                 [
                     'email' => $email ?? '',
                     'name' => $name ?? '',
-                    'role' => $roleID ?? '',
+                    'role' => $roleID,
+                    'pre_onboard' => true,
                 ]
             ],
-            'name' => $name ?? '',
+            'name' => preg_replace('/\s+/', '-', trim($name ?? '')) . '-' . $serviceId,
             'pricing_policy_id' => $pricingPolicyID ?? '',
             'resource_policy_id' => $resourcePolicyID ?? '',
             'service_policy_id' => $servicePolicyID ?? '',
@@ -353,11 +343,10 @@ function hostedai_CreateAccount(array $params)
 
                 if (isset($getResponse['result']->id)) {
                     $teamId = $getResponse['result']->id;
-                    
+
                     $fields = ["team_id" => $teamId];
                     $helper->insert_hostedai_custom_fields_value($serviceId, $pid, $fields);
-                    
-                    // 
+
                     $billingCycle = $params['model']->billingcycle;
                     if ($billingCycle === 'One Time') {
                         $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert');
@@ -559,7 +548,7 @@ function hostedai_AdminServicesTabFields(array $params)
         global $CONFIG;
         global $whmcs;
 
-        $loginURL = !empty($params['configoption8']) ? $params['configoption8'] : '#';
+        $loginURL = !empty($params['configoption7']) ? $params['configoption7'] : '#';
         $helper = new Helper($params);
 
         $assets = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets";
@@ -749,7 +738,7 @@ function hostedai_ClientArea(array $params)
         global $whmcs;
         $helper = new Helper($params);
 
-        $loginURL = !empty($params['configoption8']) ? $params['configoption8'] : '#';
+        $loginURL = !empty($params['configoption7']) ? $params['configoption7'] : '#';
 
         $assets = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets";
 

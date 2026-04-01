@@ -12,7 +12,7 @@ function generateOTLAndLogin(button, serviceId, userEmail, staticLoginUrl) {
     formData.append('user_email', userEmail);
     formData.append('static_login_url', staticLoginUrl);
     
-    fetch('./modules/servers/hostedai/lib/ajax.php', {
+    fetch('/modules/servers/hostedai/lib/ajax.php', {
         method: 'POST',
         body: formData
     })

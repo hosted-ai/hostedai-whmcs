@@ -41,18 +41,15 @@ class Helper
 
         $servername = $params['serverhostname'];
         if ($servername == '') {
-            $servername = Capsule::table('tblservers')->where('type', 'hostedai')->value('hostname');
+            $servername = Capsule::table('tblservers')->where('type', 'hostedai')->where('disabled', 0)->value('hostname');
         }
-
-
 
         $this->baseUrl = "https://" . $servername . "/api/";
 
- 
         $this->token = $params['serverpassword'];
         if ($this->token == '') {
-            $password = Capsule::table('tblservers')->where('type', 'hostedai')->value('password');
-            $this->token =  decrypt($password);
+            $password = Capsule::table('tblservers')->where('type', 'hostedai')->where('disabled', 0)->value('password');
+            $this->token = decrypt($password);
         }
     }
 
@@ -84,6 +81,38 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Unable to create Hostedai Team, Error: ', $e->getMessage());
+        }
+    }
+
+    /** Invite members to a team with pre-onboarding */
+    public function inviteTeamMembers($teamId, $members)
+    {
+        try {
+            $endPoint = 'team/' . $teamId . '/invite';
+            $curlResponse = $this->curlCall("POST", "inviteTeamMembers", $endPoint, $members);
+            return $curlResponse;
+        } catch (Exception $e) {
+            logActivity('Unable to invite team members, Error: ' . $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
+        }
+    }
+
+    /** Onboard a user (complete registration without email flow) */
+    public function onboardUser($email, $name, $password)
+    {
+        try {
+            $endPoint = 'onboard';
+            $data = [
+                'email' => $email,
+                'name' => $name,
+                'old_password' => $password,
+                'new_password' => $password,
+            ];
+            $curlResponse = $this->curlCall("POST", "onboardUser", $endPoint, $data);
+            return $curlResponse;
+        } catch (Exception $e) {
+            logActivity('Unable to onboard user, Error: ' . $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -171,34 +200,16 @@ class Helper
         try {
 
             // Production: Bill for last month
-            $start_date = date('Y-m-01', strtotime('first day of last month'));
-            $end_date = date('Y-m-t', strtotime('last month'));
-            
-            // TESTING OPTIONS: Uncomment ONE of the options below for testing
-            
-            // Option 1: Current month to date
-            // $start_date = date('Y-m-01'); // First day of current month
-            // $end_date = date('Y-m-d');    // Today
-            
-            // Option 2: Full UI date range (captures all historical usage)
-            // $start_date = '2024-10-01'; // Match UI start date
-            // $end_date = '2025-09-30';   // Match UI end date
-            
-            // Option 3: Custom date range (modify dates as needed)
-            // $start_date = '2024-09-01'; // Custom start date
-            // $end_date = '2024-09-30';   // Custom end date
-            
-            // Option 4: Previous month (alternative to production default)
-            // $start_date = date('Y-m-01', strtotime('first day of -2 months'));
-            // $end_date = date('Y-m-t', strtotime('-2 months'));
+            $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
+            $end_date = date('Y-m-t\T23:59', strtotime('last month'));
 
-            $endPoint = "team-billing/group-by-workspace/" . $teamid . "/" . $start_date . "/" . $end_date . "/monthly";
+            $endPoint = "team-billing/group-by-workspace/" . $teamid . "/" . $start_date . "/" . $end_date . "/monthly?timezone=UTC";
             
             // Debug logging (disabled in production for security)
             // logActivity("DEBUG generateBill: TeamID={$teamid}, StartDate={$start_date}, EndDate={$end_date}");
             // logActivity("DEBUG generateBill: Full URL=" . $this->baseUrl . $endPoint);
 
-            $curlResponse = $this->curlCall("GET", '', "generateBill", $endPoint);
+            $curlResponse = $this->curlCall("GET", "generateBill", $endPoint, '');
 
             return $curlResponse;
         } catch (Exception $e) {
@@ -212,15 +223,15 @@ class Helper
     {
         try {
             if (!$start_date) {
-                $start_date = date('Y-m-01', strtotime('first day of last month'));
+                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
             }
             if (!$end_date) {
-                $end_date = date('Y-m-t', strtotime('last month'));
+                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
             }
 
-            $endPoint = "team-billing/" . $teamid . "/" . $start_date . "/" . $end_date . "/" . $interval;
+            $endPoint = "team-billing/" . $teamid . "/" . $start_date . "/" . $end_date . "/" . $interval . "?timezone=UTC";
 
-            $curlResponse = $this->curlCall("GET", '', "generateDetailedTeamBill", $endPoint);
+            $curlResponse = $this->curlCall("GET", "generateDetailedTeamBill", $endPoint, '');
 
             return $curlResponse;
         } catch (Exception $e) {
@@ -234,15 +245,15 @@ class Helper
     {
         try {
             if (!$start_date) {
-                $start_date = date('Y-m-01', strtotime('first day of last month'));
+                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
             }
             if (!$end_date) {
-                $end_date = date('Y-m-t', strtotime('last month'));
+                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
             }
 
-            $endPoint = "workspace-billing/" . $workspaceId . "/" . $start_date . "/" . $end_date . "/" . $interval;
+            $endPoint = "workspace-billing/" . $workspaceId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?timezone=UTC";
 
-            $curlResponse = $this->curlCall("GET", '', "getWorkspaceBilling", $endPoint);
+            $curlResponse = $this->curlCall("GET", "getWorkspaceBilling", $endPoint, '');
 
             return $curlResponse;
         } catch (Exception $e) {
@@ -256,24 +267,15 @@ class Helper
     {
         try {
             if (!$start_date) {
-                // Production: Bill for last month
-                $start_date = date('Y-m-01', strtotime('first day of last month'));
-                // For testing: Uncomment below to use current month instead
-                // $start_date = date('Y-m-01'); // First day of current month
-                // For testing: Uncomment below to match UI date range (full year)
-                // $start_date = '2024-10-01'; // Match UI start date
+                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
             }
             if (!$end_date) {
-                $end_date = date('Y-m-t', strtotime('last month'));
-                // For testing: Uncomment below to use current month instead
-                // $end_date = date('Y-m-d');    // Today
-                // For testing: Uncomment below to match UI date range (full year)
-                // $end_date = '2025-09-30';   // Match UI end date
+                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
             }
 
-            $endPoint = "team-billing/shared-storage/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "/" . $regionId;
+            $endPoint = "team-billing/shared-storage/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?region_id=" . urlencode($regionId) . "&timezone=UTC";
 
-            $curlResponse = $this->curlCall("GET", '', "getTeamSharedStorageBilling", $endPoint);
+            $curlResponse = $this->curlCall("GET", "getTeamSharedStorageBilling", $endPoint, '');
 
             return $curlResponse;
         } catch (Exception $e) {
@@ -287,24 +289,15 @@ class Helper
     {
         try {
             if (!$start_date) {
-                // Production: Bill for last month
-                $start_date = date('Y-m-01', strtotime('first day of last month'));
-                // For testing: Uncomment below to use current month instead
-                // $start_date = date('Y-m-01'); // First day of current month
-                // For testing: Uncomment below to match UI date range (full year)
-                // $start_date = '2024-10-01'; // Match UI start date
+                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
             }
             if (!$end_date) {
-                $end_date = date('Y-m-t', strtotime('last month'));
-                // For testing: Uncomment below to use current month instead
-                // $end_date = date('Y-m-d');    // Today
-                // For testing: Uncomment below to match UI date range (full year)
-                // $end_date = '2025-09-30';   // Match UI end date
+                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
             }
 
-            $endPoint = "team-billing/gpuaas-pool/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "/" . $regionId;
+            $endPoint = "team-billing/gpuaas-pool/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?region_id=" . urlencode($regionId) . "&timezone=UTC";
 
-            $curlResponse = $this->curlCall("GET", '', "getTeamGpuaasPoolBilling", $endPoint);
+            $curlResponse = $this->curlCall("GET", "getTeamGpuaasPoolBilling", $endPoint, '');
 
             return $curlResponse;
         } catch (Exception $e) {
@@ -382,7 +375,7 @@ class Helper
 
             $data = ["team_id" => $team_id];
 
-            $curlResponse = $this->curlCall("POST", $data, "updatePricing", $endPoint);
+            $curlResponse = $this->curlCall("POST", "updatePricing", $endPoint, $data);
 
             return $curlResponse;
 
@@ -400,7 +393,7 @@ class Helper
 
             $data = ["policy_id" => $resource_id, "team_id" => $team_id];
 
-            $curlResponse = $this->curlCall("POST", $data, "updateResource", $endPoint);
+            $curlResponse = $this->curlCall("POST", "updateResource", $endPoint, $data);
             
             return $curlResponse;
 
@@ -519,18 +512,22 @@ class Helper
     }
 
     /** Create One Time Login Token */
-    public function createOneTimeLoginToken($userEmail)
+    public function createOneTimeLoginToken($userEmail, $fullData = null)
     {
         try {
             $endPoint = 'create-otl';
-            $data = [
-                'email' => $userEmail,
-                'send_email_invite' => false  // We just want the URL, not to send email
-            ];
+            if ($fullData) {
+                $data = $fullData;
+            } else {
+                $data = [
+                    'email' => $userEmail,
+                    'send_email_invite' => false
+                ];
+            }
             $curlResponse = $this->curlCall("POST", "createOneTimeLoginToken", $endPoint, $data);
             return $curlResponse;
         } catch (Exception $e) {
-            logActivity('Unable to create OTL token, Error: ', $e->getMessage());
+            logActivity('Unable to create OTL token, Error: ' . $e->getMessage());
             return ['httpcode' => 500, 'result' => null];
         }
     }
@@ -561,9 +558,8 @@ class Helper
 
         curl_setopt($curl, CURLOPT_URL, $baseUrl . $endpoint);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 0);
+        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($curl, CURLOPT_MAXREDIRS, 10);
-        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 0);
         curl_setopt($curl, CURLOPT_TIMEOUT, 10); //timeout in seconds
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, 1);
         if (isset($this->token) && $this->token != '')
