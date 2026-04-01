@@ -8,12 +8,15 @@ if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
 
+define('HOSTEDAI_MODULE_VERSION', '2.2.0');
+
 function hostedai_MetaData()
 {
     return array(
         'DisplayName' => 'hosted·ai',
-        'APIVersion' => '1.0', // Use API Version 1.1
-        'RequiresServer' => true, // Set true if module requires a server to work
+        'APIVersion' => '1.0',
+        'RequiresServer' => true,
+        'Version' => HOSTEDAI_MODULE_VERSION,
     );
 }
 
@@ -321,7 +324,7 @@ function hostedai_CreateAccount(array $params)
                     'pre_onboard' => true,
                 ]
             ],
-            'name' => ($name ?? '') . '-' . $serviceId,
+            'name' => preg_replace('/\s+/', '-', trim($name ?? '')) . '-' . $serviceId,
             'pricing_policy_id' => $pricingPolicyID ?? '',
             'resource_policy_id' => $resourcePolicyID ?? '',
             'service_policy_id' => $servicePolicyID ?? '',

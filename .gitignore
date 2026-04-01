@@ -1,1 +1,23 @@
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# PHP
+vendor/
+composer.lock
+
+# Testing
+test_config.php
+test_cases*.csv
+tests/
+
+# Environment
+.env
+*.log
