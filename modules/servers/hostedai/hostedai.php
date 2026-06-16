@@ -8,7 +8,7 @@ if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
 
-define('HOSTEDAI_MODULE_VERSION', '2.2.0');
+define('HOSTEDAI_MODULE_VERSION', '2.4.0');
 
 function hostedai_MetaData()
 {
@@ -314,8 +314,14 @@ function hostedai_CreateAccount(array $params)
         $postData = [
             'color' => $color ?? '#414141',
             'description' => '',
-            'image_policy_id' => $imagePolicyID ?? '',
-            "instance_type_policy_id" => $instancePolicyID ?? '',
+            'has_general_policies' => true,
+            'general' => [
+                'image_policy_id' => $imagePolicyID ?? '',
+                'instance_type_policy_id' => $instancePolicyID ?? '',
+                'pricing_policy_id' => $pricingPolicyID ?? '',
+                'resource_policy_id' => $resourcePolicyID ?? '',
+                'service_policy_id' => $servicePolicyID ?? '',
+            ],
             'members' => [
                 [
                     'email' => $email ?? '',
@@ -325,9 +331,6 @@ function hostedai_CreateAccount(array $params)
                 ]
             ],
             'name' => preg_replace('/\s+/', '-', trim($name ?? '')) . '-' . $serviceId,
-            'pricing_policy_id' => $pricingPolicyID ?? '',
-            'resource_policy_id' => $resourcePolicyID ?? '',
-            'service_policy_id' => $servicePolicyID ?? '',
         ];
         
 
