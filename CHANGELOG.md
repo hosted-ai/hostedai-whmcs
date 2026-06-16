@@ -6,6 +6,11 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-16
+
+### Changed
+- Adapted team creation payload to ariel API: policy IDs now nested under `general` object with `has_general_policies: true` flag (breaking change in `POST /api/team`)
+
 ## [2.2.0] - 2025-03-12
 
 ### Changed
