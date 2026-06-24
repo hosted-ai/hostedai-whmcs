@@ -227,6 +227,19 @@ function hostedai_ConfigOptions(array $params)
             'Type' => 'text',
             'Size' => '25',
         ),
+        'billing_mode' => array(
+            'FriendlyName' => 'Billing Mode',
+            'Type' => 'dropdown',
+            'Options' => 'monthly,prepaid',
+            'Description' => 'monthly = invoice at end of month; prepaid = deduct from wallet each hour',
+        ),
+        'min_balance' => array(
+            'FriendlyName' => 'Min Wallet Balance ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Default' => '1.00',
+            'Description' => 'Suspend when wallet drops to or below this amount (prepaid mode only)',
+        ),
 
     );
 
@@ -350,9 +363,10 @@ function hostedai_CreateAccount(array $params)
                     $fields = ["team_id" => $teamId];
                     $helper->insert_hostedai_custom_fields_value($serviceId, $pid, $fields);
 
+                    $billingMode = $params['configoption10'] ?: 'monthly';
                     $billingCycle = $params['model']->billingcycle;
-                    if ($billingCycle === 'One Time') {
-                        $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert');
+                    if ($billingMode === 'prepaid' || $billingCycle === 'One Time') {
+                        $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert', $billingMode);
                     }
                 }
                 

@@ -462,7 +462,7 @@ class Helper
     }
 
     /* Insert Team details in custom table */
-    public function insert_teamDetail($userId, $serviceId, $pid, $actionId, $action)
+    public function insert_teamDetail($userId, $serviceId, $pid, $actionId, $action, $billingMode = 'monthly')
     {
         try {
             if (!Capsule::schema()->hasTable('mod_hostdaiteam_details')) {
@@ -474,27 +474,50 @@ class Helper
                     $table->string('teamid');
                     $table->string('invoiceid');
                     $table->string('status');
+                    $table->string('billing_mode')->default('monthly');
+                    $table->string('suspended_reason')->nullable();
+                    $table->dateTime('last_billed_at')->nullable();
                     $table->timestamps();
                 });
+            } else {
+                if (!Capsule::schema()->hasColumn('mod_hostdaiteam_details', 'billing_mode')) {
+                    Capsule::schema()->table('mod_hostdaiteam_details', function ($table) {
+                        $table->string('billing_mode')->default('monthly');
+                    });
+                }
+                if (!Capsule::schema()->hasColumn('mod_hostdaiteam_details', 'suspended_reason')) {
+                    Capsule::schema()->table('mod_hostdaiteam_details', function ($table) {
+                        $table->string('suspended_reason')->nullable();
+                    });
+                }
+                if (!Capsule::schema()->hasColumn('mod_hostdaiteam_details', 'last_billed_at')) {
+                    Capsule::schema()->table('mod_hostdaiteam_details', function ($table) {
+                        $table->dateTime('last_billed_at')->nullable();
+                    });
+                }
             }
 
             if ($action == 'insert') {
-
                 Capsule::table('mod_hostdaiteam_details')->insert([
-                    'uid' => $userId,
-                    'sid' => $serviceId,
-                    'pid' => $pid,
-                    'teamid' => $actionId,
-                    'invoiceid' => '',
-                    'status' => 'pending',
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'uid'          => $userId,
+                    'sid'          => $serviceId,
+                    'pid'          => $pid,
+                    'teamid'       => $actionId,
+                    'invoiceid'    => '',
+                    'status'       => 'pending',
+                    'billing_mode' => $billingMode,
+                    'created_at'   => date('Y-m-d H:i:s'),
+                    'updated_at'   => date('Y-m-d H:i:s'),
                 ]);
             } elseif ($action == 'update') {
-                Capsule::table('mod_hostdaiteam_details')->where('uid', $userId)->where('pid', $pid)->where('sid', $serviceId)->update([
-                    'invoiceid' => $actionId,
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
+                Capsule::table('mod_hostdaiteam_details')
+                    ->where('uid', $userId)
+                    ->where('pid', $pid)
+                    ->where('sid', $serviceId)
+                    ->update([
+                        'invoiceid'  => $actionId,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
             }
         } catch (\Exception $e) {
             logActivity('Function (insert_teamDetail) Hostedai Error: ' . $e->getMessage());
