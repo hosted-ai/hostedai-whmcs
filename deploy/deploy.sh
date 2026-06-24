@@ -29,12 +29,15 @@ BACKUP_DIR="${REMOTE_BACKUP_BASE}/${TIMESTAMP}"
 if [ "$#" -gt 0 ]; then
     FILES=("$@")
 else
+    FILES=()
     if [ -f "${LAST_DEPLOYED_FILE}" ]; then
         LAST_HASH=$(cat "${LAST_DEPLOYED_FILE}")
-        mapfile -t FILES < <(git diff --name-only "${LAST_HASH}" HEAD -- '*.php' '*.tpl' '*.css' '*.js' 2>/dev/null || true)
+        while IFS= read -r line; do [ -n "$line" ] && FILES+=("$line"); done \
+            < <(git diff --name-only "${LAST_HASH}" HEAD -- '*.php' '*.tpl' '*.css' '*.js' 2>/dev/null || true)
     else
         # First deploy — take everything tracked
-        mapfile -t FILES < <(git ls-files -- '*.php' '*.tpl' '*.css' '*.js')
+        while IFS= read -r line; do [ -n "$line" ] && FILES+=("$line"); done \
+            < <(git ls-files -- '*.php' '*.tpl' '*.css' '*.js')
     fi
 fi
 
@@ -51,6 +54,9 @@ echo "╚═══════════════════════�
 # Create backup dir on server
 ssh "${SSH_HOST}" "mkdir -p ${BACKUP_DIR}"
 
+TMP_DIR="~/hostedai-deploy-tmp/${TIMESTAMP}"
+ssh "${SSH_HOST}" "mkdir -p ${TMP_DIR}"
+
 DEPLOYED=()
 for FILE in "${FILES[@]}"; do
     if [ ! -f "${FILE}" ]; then
@@ -60,17 +66,23 @@ for FILE in "${FILES[@]}"; do
 
     REMOTE_FILE="${REMOTE_ROOT}/${FILE}"
     BACKUP_FILE="${BACKUP_DIR}/${FILE}"
+    TMP_FILE="${TMP_DIR}/${FILE}"
 
     # Backup current server version
     echo -n "  backup ${FILE} ... "
-    ssh "${SSH_HOST}" "mkdir -p \$(dirname ${BACKUP_FILE}) && cp ${REMOTE_FILE} ${BACKUP_FILE} 2>/dev/null && echo ok || echo new"
+    ssh "${SSH_HOST}" "mkdir -p \$(dirname ${BACKUP_FILE}) && sudo cp ${REMOTE_FILE} ${BACKUP_FILE} 2>/dev/null && echo ok || echo new"
 
-    # Deploy
+    # SCP to tmp (user-writable), then sudo cp to target
     echo -n "  deploy ${FILE} ... "
-    scp -q "${FILE}" "${SSH_HOST}:${REMOTE_FILE}" && echo "ok"
+    ssh "${SSH_HOST}" "mkdir -p \$(dirname ${TMP_FILE})"
+    scp -q "${FILE}" "${SSH_HOST}:${TMP_FILE}"
+    ssh "${SSH_HOST}" "sudo cp ${TMP_FILE} ${REMOTE_FILE} && echo ok"
 
     DEPLOYED+=("${FILE}")
 done
+
+# Cleanup tmp
+ssh "${SSH_HOST}" "rm -rf ${TMP_DIR}" 2>/dev/null || true
 
 # Write log entry
 printf '%s | %s | %s | %s\n' \

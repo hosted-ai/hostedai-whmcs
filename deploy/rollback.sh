@@ -55,7 +55,7 @@ while IFS= read -r BACKUP_FILE; do
     RELATIVE="${BACKUP_FILE#${BACKUP_DIR}/}"
     REMOTE_FILE="${REMOTE_ROOT}/${RELATIVE}"
     echo -n "  restore ${RELATIVE} ... "
-    ssh "${SSH_HOST}" "cp ${BACKUP_FILE} ${REMOTE_FILE} && echo ok"
+    ssh "${SSH_HOST}" "sudo cp ${BACKUP_FILE} ${REMOTE_FILE} && echo ok"
 done <<< "${BACKUP_FILES}"
 
 # Find previous deploy hash to restore .last_deployed

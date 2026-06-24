@@ -21,3 +21,4 @@ tests/
 # Environment
 .env
 *.log
+!deploy/deployments.log
