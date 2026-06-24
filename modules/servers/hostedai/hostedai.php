@@ -837,3 +837,43 @@ function hostedai_ClientArea(array $params)
         );
     }
 }
+
+/**
+ * Auto-unsuspend prepaid services when a client tops up their wallet.
+ * Fires on every InvoicePaid event; only acts on services suspended due to
+ * zero balance (suspended_reason = 'balance_zero').
+ */
+add_hook('InvoicePaid', 1, function ($vars) {
+    $userId = $vars['userid'] ?? null;
+    if (!$userId) {
+        return;
+    }
+
+    $suspended = Capsule::table('mod_hostdaiteam_details')
+        ->where('uid', $userId)
+        ->where('billing_mode', 'prepaid')
+        ->where('suspended_reason', 'balance_zero')
+        ->get();
+
+    if ($suspended->isEmpty()) {
+        return;
+    }
+
+    $creditResult = localAPI('GetClientsDetails', ['clientid' => $userId, 'stats' => true]);
+    $balance      = floatval($creditResult['credit'] ?? 0);
+
+    foreach ($suspended as $service) {
+        $product    = Capsule::table('tblproducts')->where('id', $service->pid)->first();
+        $minBalance = ($product && !empty($product->configoption11))
+            ? floatval($product->configoption11)
+            : 1.00;
+
+        if ($balance > $minBalance) {
+            localAPI('ModuleUnsuspend', ['serviceid' => $service->sid]);
+            Capsule::table('mod_hostdaiteam_details')
+                ->where('sid', $service->sid)
+                ->update(['suspended_reason' => null, 'updated_at' => date('Y-m-d H:i:s')]);
+            logActivity("hostedai: Auto-unsuspended service {$service->sid} after top-up — balance \${$balance}");
+        }
+    }
+});

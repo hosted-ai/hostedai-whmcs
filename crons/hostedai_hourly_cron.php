@@ -63,25 +63,38 @@ try {
             ->where('sid', $team->sid)
             ->update(['last_billed_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
 
-        if ($totalCost <= 0) {
+        if ($totalCost > 0) {
+            logActivity("Hourly cron: TeamID {$team->teamid} — deducting \${$totalCost}");
+
+            $description  = "Hourly usage — " . date('Y-m-d H:00') . " — Team " . $team->teamid;
+            $deductResult = $helper->createAndPayHourlyInvoice($team->uid, $totalCost, $description);
+
+            if ($deductResult['result'] !== 'success') {
+                logActivity("Hourly cron: Deduction failed for TeamID {$team->teamid}: " . json_encode($deductResult));
+            } else {
+                logActivity("Hourly cron: Deducted \${$totalCost} from UID {$team->uid}, invoice #{$deductResult['invoiceid']}");
+            }
+        } else {
             logActivity("Hourly cron: TeamID {$team->teamid} — zero usage this hour, no invoice");
-            continue;
         }
 
-        logActivity("Hourly cron: TeamID {$team->teamid} — deducting \${$totalCost}");
+        // Check balance and suspend if at or below threshold
+        $balance = $helper->getClientCreditBalance($team->uid);
+        if ($balance !== null) {
+            $product    = Capsule::table('tblproducts')->where('id', $team->pid)->first();
+            $minBalance = ($product && !empty($product->configoption11))
+                ? floatval($product->configoption11)
+                : 1.00;
+            $currentReason = $team->suspended_reason ?? '';
 
-        // Deduct: create invoice for this hour + immediately pay from credit balance
-        $description  = "Hourly usage — " . date('Y-m-d H:00') . " — Team " . $team->teamid;
-        $deductResult = $helper->createAndPayHourlyInvoice($team->uid, $totalCost, $description);
-
-        if ($deductResult['result'] !== 'success') {
-            logActivity("Hourly cron: Deduction failed for TeamID {$team->teamid}: " . json_encode($deductResult));
-            continue;
+            if ($balance <= $minBalance && $currentReason !== 'balance_zero') {
+                $helper->suspendTerminate_service($team->sid, $team->pid, 'ModuleSuspend');
+                Capsule::table('mod_hostdaiteam_details')
+                    ->where('sid', $team->sid)
+                    ->update(['suspended_reason' => 'balance_zero', 'updated_at' => date('Y-m-d H:i:s')]);
+                logActivity("Hourly cron: Suspended service {$team->sid} (TeamID {$team->teamid}) — balance \${$balance} ≤ threshold \${$minBalance}");
+            }
         }
-
-        logActivity("Hourly cron: Deducted \${$totalCost} from UID {$team->uid}, invoice #{$deductResult['invoiceid']}");
-
-        // Phase 3: balance check + suspension will be added here
     }
 
     logActivity("HostedAI Hourly Cron completed on " . date('Y-m-d H:i:s'));

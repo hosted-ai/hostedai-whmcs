@@ -362,6 +362,9 @@ try {
                     logActivity("Service ID {$invoice->sid} TERMINATED - Days since invoice: {$daysDiff} (Limit: {$terminate_days})");
                 } elseif ($daysDiff > $suspend_days) {
                     $helper->suspendTerminate_service($invoice->sid, $invoice->pid, 'ModuleSuspend');
+                    Capsule::table('mod_hostdaiteam_details')
+                        ->where('sid', $invoice->sid)
+                        ->update(['suspended_reason' => 'invoice_overdue', 'updated_at' => date('Y-m-d H:i:s')]);
                     logActivity("Service ID {$invoice->sid} SUSPENDED - Days since invoice: {$daysDiff} (Limit: {$suspend_days})");
                 }
             } else {
