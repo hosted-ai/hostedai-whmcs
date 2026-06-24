@@ -587,11 +587,11 @@ function hostedai_AdminServicesTabFields(array $params)
                 <tr><td><strong>Min Balance</strong></td>
                     <td>$' . number_format($minBalance, 2) . '</td></tr>
                 <tr><td><strong>Last Billed</strong></td>
-                    <td>' . ($wDetail->last_billed_at ?? '&mdash;') . '</td></tr>
+                    <td>' . htmlspecialchars($wDetail->last_billed_at ?? '—') . '</td></tr>
                 <tr><td><strong>Suspended Reason</strong></td>
-                    <td>' . ($wDetail->suspended_reason ?? '&mdash;') . '</td></tr>
+                    <td>' . htmlspecialchars($wDetail->suspended_reason ?? '—') . '</td></tr>
                 <tr><td><strong>Last Warning Sent</strong></td>
-                    <td>' . ($wDetail->low_balance_notified_at ?? '&mdash;') . '</td></tr>';
+                    <td>' . htmlspecialchars($wDetail->low_balance_notified_at ?? '—') . '</td></tr>';
         } else {
             $modeLabel  = '<span class="label label-default" style="font-size:13px">monthly</span>';
             $walletRows = '';
