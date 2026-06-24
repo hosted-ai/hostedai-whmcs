@@ -15,10 +15,15 @@ if (!empty($whmcspath)) {
 
 $helper = new Helper();
 
+// 55 min = hourly cron interval (60 min) minus a 5-min overlap buffer.
+// Keeps billing idempotent when the cron scheduler fires slightly early or two
+// processes overlap at the start of an hour.
+const CRON_OVERLAP_GUARD_MINUTES = 55;
+
 try {
     logActivity("HostedAI Hourly Cron started on " . date('Y-m-d H:i:s'));
 
-    // Ensure Phase 4 columns exist before querying the table
+    // Ensure wallet columns exist before querying the table (idempotent ALTER TABLE guards).
     $helper->ensureWalletColumns();
 
     $teams = Capsule::table('mod_hostdaiteam_details')
@@ -27,14 +32,15 @@ try {
 
     foreach ($teams as $team) {
 
-        // Billing phase — guarded by 55-min check (prevents double-billing on cron overlap).
-        // API errors also skip this team entirely since we can't know the post-billing balance.
+        // Billing phase — guarded by CRON_OVERLAP_GUARD_MINUTES to prevent double-billing
+        // when two cron processes overlap. API errors also skip the balance check since
+        // we can't know the post-billing balance in that case.
         $skipBalanceCheck = false;
         $shouldBill = true;
 
         if (!empty($team->last_billed_at)) {
             $secondsSince = time() - strtotime($team->last_billed_at);
-            if ($secondsSince < 55 * 60) {
+            if ($secondsSince < CRON_OVERLAP_GUARD_MINUTES * 60) {
                 logActivity("Hourly cron: Skipping billing for TeamID {$team->teamid} — last billed {$secondsSince}s ago");
                 $shouldBill = false;
             }
