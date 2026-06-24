@@ -20,10 +20,17 @@ if (!defined("WHMCS")) {
  * Services suspended for invoice_overdue are intentionally ignored.
  */
 add_hook('InvoicePaid', 1, function ($vars) {
-    $userId = $vars['userid'] ?? null;
-    if (!$userId) {
+    $invoiceId = $vars['invoiceid'] ?? null;
+    if (!$invoiceId) {
         return;
     }
+
+    // InvoicePaid only passes invoiceid — look up the client from the invoice
+    $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+    if (!$invoice) {
+        return;
+    }
+    $userId = $invoice->userid;
 
     $suspended = Capsule::table('mod_hostdaiteam_details')
         ->where('uid', $userId)
