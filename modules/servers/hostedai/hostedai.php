@@ -566,6 +566,49 @@ function hostedai_AdminServicesTabFields(array $params)
         $loginURL = !empty($params['configoption7']) ? $params['configoption7'] : '#';
         $helper = new Helper($params);
 
+        // Phase 6: wallet panel — built from DB only, no external API dependency
+        $serviceId   = $params['serviceid'];
+        $userId      = $params['userid'];
+        $wDetail     = Capsule::table('mod_hostdaiteam_details')->where('sid', $serviceId)->first();
+        $billingMode = $wDetail ? ($wDetail->billing_mode ?? 'monthly') : 'monthly';
+        $minBalance  = !empty($params['configoption11']) ? floatval($params['configoption11']) : 1.00;
+
+        if ($billingMode === 'prepaid') {
+            $cr      = localAPI('GetClientsDetails', ['clientid' => $userId, 'stats' => true]);
+            $balance = (isset($cr['result']) && $cr['result'] === 'success') ? floatval($cr['credit'] ?? 0) : null;
+            $balFmt  = $balance !== null ? '$' . number_format($balance, 2) : 'N/A';
+            $balStyle = ($balance !== null && $balance <= $minBalance)
+                ? 'color:#c0392b;font-weight:bold'
+                : 'color:#27ae60;font-weight:bold';
+            $modeLabel  = '<span class="label label-info" style="font-size:13px">prepaid</span>';
+            $walletRows = '
+                <tr><td style="width:45%"><strong>Wallet Balance</strong></td>
+                    <td style="' . $balStyle . '">' . $balFmt . '</td></tr>
+                <tr><td><strong>Min Balance</strong></td>
+                    <td>$' . number_format($minBalance, 2) . '</td></tr>
+                <tr><td><strong>Last Billed</strong></td>
+                    <td>' . ($wDetail->last_billed_at ?? '&mdash;') . '</td></tr>
+                <tr><td><strong>Suspended Reason</strong></td>
+                    <td>' . ($wDetail->suspended_reason ?? '&mdash;') . '</td></tr>
+                <tr><td><strong>Last Warning Sent</strong></td>
+                    <td>' . ($wDetail->low_balance_notified_at ?? '&mdash;') . '</td></tr>';
+        } else {
+            $modeLabel  = '<span class="label label-default" style="font-size:13px">monthly</span>';
+            $walletRows = '';
+        }
+
+        $walletPanel = '
+            <div class="panel panel-info" style="max-width:600px">
+                <div class="panel-heading"><strong>Wallet &amp; Billing</strong></div>
+                <div class="panel-body" style="padding:0">
+                    <table class="table" style="margin:0">
+                        <tr><td style="width:45%"><strong>Billing Mode</strong></td>
+                            <td>' . $modeLabel . '</td></tr>
+                        ' . $walletRows . '
+                    </table>
+                </div>
+            </div>';
+
         $assets = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets";
 
         $language = $CONFIG['Language'];
@@ -710,20 +753,21 @@ function hostedai_AdminServicesTabFields(array $params)
                 
                         return [
                             " Hosting Information" => $informationHtml,
+                            " Wallet & Billing"    => $walletPanel,
                         ];
-        
+
                     }
-    
+
                 }
-    
-    
-    
+
             }
 
         }
 
+        // Team API unavailable — still surface wallet info
+        return [" Wallet & Billing" => $walletPanel];
+
     } catch (Exception $e) {
-        // Record the error in WHMCS's module log.
         logModuleCall(
             'hostedai',
             __FUNCTION__,
