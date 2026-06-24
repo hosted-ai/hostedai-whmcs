@@ -597,6 +597,23 @@ function hostedai_AdminServicesTabFields(array $params)
             $walletRows = '';
         }
 
+        $selMonthly = $billingMode === 'monthly' ? ' selected' : '';
+        $selPrepaid = $billingMode === 'prepaid' ? ' selected' : '';
+        $switchRow  = '
+                <tr>
+                    <td><strong>Switch Billing Mode</strong></td>
+                    <td>
+                        <select name="billing_mode_switch" class="form-control"
+                                style="width:auto;display:inline-block;min-width:120px">
+                            <option value="monthly"' . $selMonthly . '>Monthly</option>
+                            <option value="prepaid"' . $selPrepaid . '>Prepaid</option>
+                        </select>
+                        <span class="text-muted" style="margin-left:8px;font-size:12px">
+                            Click &ldquo;Save Changes&rdquo; to apply
+                        </span>
+                    </td>
+                </tr>';
+
         $walletPanel = '
             <div class="panel panel-info" style="max-width:600px">
                 <div class="panel-heading"><strong>Wallet &amp; Billing</strong></div>
@@ -604,7 +621,7 @@ function hostedai_AdminServicesTabFields(array $params)
                     <table class="table" style="margin:0">
                         <tr><td style="width:45%"><strong>Billing Mode</strong></td>
                             <td>' . $modeLabel . '</td></tr>
-                        ' . $walletRows . '
+                        ' . $walletRows . $switchRow . '
                     </table>
                 </div>
             </div>';
@@ -777,6 +794,58 @@ function hostedai_AdminServicesTabFields(array $params)
         );
     }
     return array();
+}
+
+/**
+ * Save handler for the Wallet & Billing admin tab.
+ *
+ * Called by WHMCS when admin saves the service page. Reads billing_mode_switch
+ * from POST and updates mod_hostdaiteam_details accordingly.
+ */
+function hostedai_AdminServicesTabFieldsSave(array $params)
+{
+    try {
+        $serviceId = $params['serviceid'];
+        $newMode   = $params['billing_mode_switch'] ?? null;
+
+        if (!in_array($newMode, ['monthly', 'prepaid'], true)) {
+            return;
+        }
+
+        $exists = Capsule::table('mod_hostdaiteam_details')->where('sid', $serviceId)->exists();
+        if (!$exists) {
+            return;
+        }
+
+        $current = Capsule::table('mod_hostdaiteam_details')
+            ->where('sid', $serviceId)
+            ->value('billing_mode');
+
+        if ($current === $newMode) {
+            return;
+        }
+
+        Capsule::table('mod_hostdaiteam_details')
+            ->where('sid', $serviceId)
+            ->update([
+                'billing_mode'            => $newMode,
+                'suspended_reason'        => null,
+                'last_billed_at'          => null,
+                'low_balance_notified_at' => null,
+                'updated_at'              => date('Y-m-d H:i:s'),
+            ]);
+
+        logActivity("hostedai: Admin switched service {$serviceId} billing_mode {$current} → {$newMode}");
+
+    } catch (Exception $e) {
+        logModuleCall(
+            'hostedai',
+            __FUNCTION__,
+            $params,
+            $e->getMessage(),
+            $e->getTraceAsString()
+        );
+    }
 }
 
 /**
