@@ -30,6 +30,39 @@
         </div>
     </div>
 
+    {if $walletBillingMode eq 'prepaid'}
+    <div class="panel panel-info">
+        <div class="panel-heading"><strong>Prepaid Wallet</strong></div>
+        <div class="panel-body">
+            <div class="row">
+                <div class="col-sm-4">
+                    <p class="text-muted" style="margin-bottom:2px">Current Balance</p>
+                    <h4 style="margin-top:0">{if $walletSuspended}<span class="text-danger">${$walletBalance}</span>{elseif $walletLowBalance}<span class="text-warning">${$walletBalance}</span>{else}<span class="text-success">${$walletBalance}</span>{/if}</h4>
+                </div>
+                <div class="col-sm-4">
+                    <p class="text-muted" style="margin-bottom:2px">Minimum Balance</p>
+                    <h4 style="margin-top:0">${$walletMinBalance}</h4>
+                </div>
+                {if $walletLastBilled}
+                <div class="col-sm-4">
+                    <p class="text-muted" style="margin-bottom:2px">Last Billed</p>
+                    <h4 style="margin-top:0;font-size:14px">{$walletLastBilled}</h4>
+                </div>
+                {/if}
+            </div>
+            {if $walletSuspended}
+            <div class="alert alert-danger" style="margin-top:10px;margin-bottom:0">
+                Service is suspended due to zero balance. Please top up your wallet to reactivate.
+            </div>
+            {elseif $walletLowBalance}
+            <div class="alert alert-warning" style="margin-top:10px;margin-bottom:0">
+                Your balance is low. Please top up soon to avoid service suspension.
+            </div>
+            {/if}
+        </div>
+    </div>
+    {/if}
+
     <div class="panel panel-success">
         <div class="panel-heading">{$LANG['team_heading']}</div>
         <div class="panel-body">

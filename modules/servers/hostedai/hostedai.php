@@ -798,9 +798,31 @@ function hostedai_ClientArea(array $params)
                         }
                     }
             
+                    // Wallet vars for prepaid services
+                    $walletVars = [];
+                    $serviceId  = $params['serviceid'];
+                    $userId     = $params['clientsdetails']['userid'] ?? null;
+                    if ($userId) {
+                        $detail      = Capsule::table('mod_hostdaiteam_details')->where('sid', $serviceId)->first();
+                        $billingMode = $detail ? ($detail->billing_mode ?? 'monthly') : 'monthly';
+                        if ($billingMode === 'prepaid') {
+                            $creditResult = localAPI('GetClientsDetails', ['clientid' => $userId, 'stats' => true]);
+                            $balance      = floatval($creditResult['credit'] ?? 0);
+                            $minBalance   = floatval(!empty($params['configoption11']) ? $params['configoption11'] : 1.00);
+                            $walletVars   = [
+                                'walletBillingMode' => 'prepaid',
+                                'walletBalance'     => number_format($balance, 2),
+                                'walletMinBalance'  => number_format($minBalance, 2),
+                                'walletLastBilled'  => $detail->last_billed_at ?? null,
+                                'walletLowBalance'  => ($balance > $minBalance && $balance <= $minBalance * 2),
+                                'walletSuspended'   => isset($detail->suspended_reason) && $detail->suspended_reason === 'balance_zero',
+                            ];
+                        }
+                    }
+
                     return array(
                         'templatefile' => $templateFile,
-                        'templateVariables' => array(
+                        'templateVariables' => array_merge(array(
                             'responseData' => $responseData,
                             'teammembers' => $getTeamMembers ? $getTeamMembers['result']->members : '',
                             'resourcesData' => $resourceOverviewData,
@@ -809,7 +831,7 @@ function hostedai_ClientArea(array $params)
                             'userEmail' => $params['clientsdetails']['email'],
                             'assets' => $assets,
                             'LANG' => $_ADDONLANG
-                        ),
+                        ), $walletVars),
                     );
     
                 }

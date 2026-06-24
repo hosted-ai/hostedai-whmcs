@@ -399,6 +399,76 @@ class Helper
         }
     }
 
+    /**
+     * Ensure low_balance_notified_at column exists in mod_hostdaiteam_details.
+     * Called by the hourly cron before querying the table.
+     */
+    public function ensureWalletColumns()
+    {
+        try {
+            if (!Capsule::schema()->hasTable('mod_hostdaiteam_details')) {
+                return;
+            }
+            if (!Capsule::schema()->hasColumn('mod_hostdaiteam_details', 'low_balance_notified_at')) {
+                Capsule::schema()->table('mod_hostdaiteam_details', function ($table) {
+                    $table->dateTime('low_balance_notified_at')->nullable();
+                });
+            }
+        } catch (\Exception $e) {
+            logActivity('ensureWalletColumns error: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Send a low-balance warning email to the client.
+     * Auto-creates the email template in WHMCS if it does not exist.
+     */
+    public function sendLowBalanceWarning($userId, $serviceId, $balance, $minBalance)
+    {
+        try {
+            $templateName = 'hostedai_low_balance_warning';
+
+            $exists = Capsule::table('tblemailtemplates')
+                ->where('name', $templateName)
+                ->exists();
+
+            if (!$exists) {
+                Capsule::table('tblemailtemplates')->insert([
+                    'type'      => 'general',
+                    'name'      => $templateName,
+                    'subject'   => 'Low Wallet Balance — Action Required',
+                    'message'   => '<p>Dear {$client_name},</p>'
+                        . '<p>Your prepaid wallet balance for service #' . '{$service_id}' . ' is currently <strong>$' . '{$balance}' . '</strong>.</p>'
+                        . '<p>The minimum balance threshold is <strong>$' . '{$threshold}' . '</strong>. '
+                        . 'Please top up your wallet to avoid service suspension.</p>',
+                    'disabled'  => 0,
+                    'custom'    => 1,
+                    'fromname'  => '',
+                    'fromemail' => '',
+                ]);
+            }
+
+            $customVars = base64_encode(serialize([
+                'service_id' => $serviceId,
+                'balance'    => number_format($balance, 2),
+                'threshold'  => number_format($minBalance, 2),
+            ]));
+
+            $result = localAPI('SendEmail', [
+                'messagename' => $templateName,
+                'id'          => $userId,
+                'customvars'  => $customVars,
+            ]);
+
+            logActivity("hostedai: Low balance warning sent to UID {$userId} for service {$serviceId} — balance \${$balance}");
+
+            return $result;
+        } catch (\Exception $e) {
+            logActivity('sendLowBalanceWarning error: ' . $e->getMessage());
+            return ['result' => 'error', 'message' => $e->getMessage()];
+        }
+    }
+
     /** Change package based on teamID */
     public function changeHostedaiTeamPackage($pricing_id, $resource_id, $teamId)
     {
@@ -535,6 +605,7 @@ class Helper
                     $table->string('billing_mode')->default('monthly');
                     $table->string('suspended_reason')->nullable();
                     $table->dateTime('last_billed_at')->nullable();
+                    $table->dateTime('low_balance_notified_at')->nullable();
                     $table->timestamps();
                 });
             } else {

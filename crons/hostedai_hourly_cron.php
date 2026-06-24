@@ -18,6 +18,9 @@ $helper = new Helper();
 try {
     logActivity("HostedAI Hourly Cron started on " . date('Y-m-d H:i:s'));
 
+    // Ensure Phase 4 columns exist before querying the table
+    $helper->ensureWalletColumns();
+
     $teams = Capsule::table('mod_hostdaiteam_details')
         ->where('billing_mode', 'prepaid')
         ->get();
@@ -93,6 +96,18 @@ try {
                     ->where('sid', $team->sid)
                     ->update(['suspended_reason' => 'balance_zero', 'updated_at' => date('Y-m-d H:i:s')]);
                 logActivity("Hourly cron: Suspended service {$team->sid} (TeamID {$team->teamid}) — balance \${$balance} ≤ threshold \${$minBalance}");
+            } elseif ($balance > $minBalance && $balance <= $minBalance * 2) {
+                // Low balance warning — send at most once per 24 hours
+                $lastNotified  = $team->low_balance_notified_at ?? null;
+                $hoursSince    = $lastNotified ? (time() - strtotime($lastNotified)) / 3600 : 999;
+                if ($hoursSince >= 24) {
+                    $helper->sendLowBalanceWarning($team->uid, $team->sid, $balance, $minBalance);
+                    Capsule::table('mod_hostdaiteam_details')
+                        ->where('sid', $team->sid)
+                        ->update(['low_balance_notified_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
+                } else {
+                    logActivity("Hourly cron: Low balance for service {$team->sid} but warning already sent {$hoursSince}h ago");
+                }
             }
         }
     }
