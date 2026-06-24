@@ -1,7 +1,0 @@
-20260624-141058 | 21a84db | ~/hostedai-backups/20260624-141058 | crons/hostedai_cron.php crons/invoice_generation_test_suite.php modules/servers/hostedai/assets/css/style.css modules/servers/hostedai/assets/js/custom.js modules/servers/hostedai/hostedai.php modules/servers/hostedai/index.php modules/servers/hostedai/lang/english.php modules/servers/hostedai/lang/index.php modules/servers/hostedai/lib/Helper.php modules/servers/hostedai/lib/ajax.php modules/servers/hostedai/lib/index.php modules/servers/hostedai/templates/error.tpl modules/servers/hostedai/templates/index.php modules/servers/hostedai/templates/manage.tpl
-20260624-143350 | 72bb009 | ~/hostedai-backups/20260624-143350 | crons/hostedai_cron.php crons/hostedai_hourly_cron.php modules/servers/hostedai/lib/Helper.php
-20260624-145037 | 7a59881 | ~/hostedai-backups/20260624-145037 | crons/hostedai_cron.php crons/hostedai_hourly_cron.php modules/servers/hostedai/hostedai.php
-20260624-145321 | 7941ded | ~/hostedai-backups/20260624-145321 | includes/hooks/hostedai_wallet.php modules/servers/hostedai/hostedai.php
-20260624-145803 | 30dea6d | ~/hostedai-backups/20260624-145803 | includes/hooks/hostedai_wallet.php
-20260624-150555 | 7b263bf | ~/hostedai-backups/20260624-150555 | modules/servers/hostedai/lib/Helper.php modules/servers/hostedai/hostedai.php modules/servers/hostedai/templates/manage.tpl crons/hostedai_hourly_cron.php
-20260624-152031 | 64a82ca | ~/hostedai-backups/20260624-152031 | crons/hostedai_hourly_cron.php
