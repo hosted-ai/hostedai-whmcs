@@ -364,10 +364,8 @@ function hostedai_CreateAccount(array $params)
                     $helper->insert_hostedai_custom_fields_value($serviceId, $pid, $fields);
 
                     $billingMode = $params['configoption10'] ?: 'monthly';
-                    $billingCycle = $params['model']->billingcycle;
-                    if ($billingMode === 'prepaid' || $billingCycle === 'One Time') {
-                        $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert', $billingMode);
-                    }
+                    $helper->ensureWalletColumns();
+                    $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert', $billingMode);
                 }
                 
             }else{

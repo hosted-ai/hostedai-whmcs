@@ -624,6 +624,7 @@ class Helper
                         $table->dateTime('last_billed_at')->nullable();
                     });
                 }
+                $this->ensureWalletColumns();
             }
 
             if ($action == 'insert') {
