@@ -29,8 +29,11 @@ try {
             logActivity("DEBUG MODE: Running invoice generation on day " . date('d') . " instead of 1st");
         }
 
-        // Generate bills and create invoices
-        $teams = Capsule::table('mod_hostdaiteam_details')->get();
+        // Generate bills and create invoices — monthly mode only
+        $teams = Capsule::table('mod_hostdaiteam_details')
+            ->where(function ($q) {
+                $q->where('billing_mode', 'monthly')->orWhereNull('billing_mode');
+            })->get();
 
         foreach ($teams as $team) {
             // Production: Basic processing log (debug info removed for security)
@@ -333,8 +336,11 @@ try {
             }
         }
     }
-    // Suspension & Termination on overdue
-    $invoices = Capsule::table('mod_hostdaiteam_details')->get();
+    // Suspension & Termination on overdue — monthly mode only (prepaid handled by hourly cron)
+    $invoices = Capsule::table('mod_hostdaiteam_details')
+        ->where(function ($q) {
+            $q->where('billing_mode', 'monthly')->orWhereNull('billing_mode');
+        })->get();
 
     foreach ($invoices as $invoice) {
         $invoice_date = Capsule::table('tblinvoices')->where('id', $invoice->invoiceid)->where('status', 'Unpaid')->value('date');

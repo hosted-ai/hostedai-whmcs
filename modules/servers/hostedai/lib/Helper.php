@@ -341,6 +341,64 @@ class Helper
         }
     }
 
+    /* Generate bill for last 1 hour (prepaid mode) */
+    public function generateHourlyBill($teamid)
+    {
+        try {
+            $end_date   = date('Y-m-d\TH:i');
+            $start_date = date('Y-m-d\TH:i', strtotime('-1 hour'));
+            $endPoint   = "team-billing/group-by-workspace/{$teamid}/{$start_date}/{$end_date}/hourly?timezone=UTC";
+            return $this->curlCall("GET", "generateHourlyBill", $endPoint, '');
+        } catch (Exception $e) {
+            logActivity('generateHourlyBill error: ' . $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
+        }
+    }
+
+    /* Create an hourly deduction invoice and immediately pay it from the client's credit balance */
+    public function createAndPayHourlyInvoice($userId, $amount, $description)
+    {
+        try {
+            $invoice = localAPI('CreateInvoice', [
+                'userid'           => $userId,
+                'date'             => date('Y-m-d'),
+                'duedate'          => date('Y-m-d'),
+                'itemdescription1' => $description,
+                'itemamount1'      => $amount,
+                'itemtaxed1'       => false,
+            ]);
+
+            if (!isset($invoice['result']) || $invoice['result'] !== 'success') {
+                logActivity("createAndPayHourlyInvoice: CreateInvoice failed for UID {$userId}: " . json_encode($invoice));
+                return ['result' => 'error', 'message' => 'CreateInvoice failed'];
+            }
+
+            $invoiceId   = $invoice['invoiceid'];
+            $creditResult = localAPI('ApplyCredit', ['invoiceid' => $invoiceId, 'amount' => $amount]);
+            logActivity("Hourly deduction: UID={$userId} amount=\${$amount} invoice=#{$invoiceId} credit=" . json_encode($creditResult));
+
+            return ['result' => 'success', 'invoiceid' => $invoiceId, 'credit_result' => $creditResult];
+        } catch (Exception $e) {
+            logActivity('createAndPayHourlyInvoice error: ' . $e->getMessage());
+            return ['result' => 'error', 'message' => $e->getMessage()];
+        }
+    }
+
+    /* Get credit balance for a client */
+    public function getClientCreditBalance($userId)
+    {
+        try {
+            $result = localAPI('GetClientsDetails', ['clientid' => $userId, 'stats' => true]);
+            if (isset($result['result']) && $result['result'] === 'success') {
+                return floatval($result['credit'] ?? 0);
+            }
+            return null;
+        } catch (Exception $e) {
+            logActivity('getClientCreditBalance error: ' . $e->getMessage());
+            return null;
+        }
+    }
+
     /** Change package based on teamID */
     public function changeHostedaiTeamPackage($pricing_id, $resource_id, $teamId)
     {
