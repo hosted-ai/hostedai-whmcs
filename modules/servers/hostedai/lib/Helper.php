@@ -68,6 +68,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Error in function (getPolicyItems), Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -81,6 +82,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Unable to create Hostedai Team, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -126,6 +128,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Unable to get team details, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -139,6 +142,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Unable to get team details, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -152,6 +156,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Unable to get Resource Overview, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -165,6 +170,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Failed to Suspend hostedai team, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -178,6 +184,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Failed to Unsuspend hostedai team, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -191,6 +198,7 @@ class Helper
             return $curlResponse;
         } catch (Exception $e) {
             logActivity('Failed to Terminate hostedai team, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -338,6 +346,7 @@ class Helper
             return $results;
         } catch (Exception $e) {
             logActivity('Unable to generate invoice for user ' . $id . ', WHMCS LOCAL API ERROR: ', $e->getMessage());
+            return ['result' => 'error', 'message' => $e->getMessage()];
         }
     }
 
@@ -491,6 +500,7 @@ class Helper
 
         } catch (Exception $e) {
             logActivity('Failed to Change hostedai team package ID:' .$teamId.  ', Error: ', $e->getMessage());
+            return ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
 
@@ -509,6 +519,7 @@ class Helper
 
         } catch (Exception $e) {
             logActivity('Failed to Change hostedai team package, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -527,6 +538,7 @@ class Helper
 
         } catch (Exception $e) {
             logActivity('Failed to Change hostedai team package, Error: ', $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
         }
     }
 
@@ -550,6 +562,7 @@ class Helper
             return $results;
         } catch (Exception $e) {
             logActivity($command . ' failed, Error:' . $e->getMessage());
+            return ['result' => 'error', 'message' => $e->getMessage()];
         }
     }
 
@@ -749,14 +762,8 @@ class Helper
             $data = ['url' =>  $baseUrl . $endpoint];
         }
 
-        if ($action == 'suspendHostedaiTeam') {
-            $response = json_encode(['response' => 'Hostedai team suspended successfully.']);
-        } elseif ($action == 'unsuspendHostedaiTeam') {
-            $response = json_encode(['response' => 'Hostedai team unsuspended successfully.']);
-        } elseif ($action == 'terminateHostedaiTeam') {
-            $response = json_encode(['response' => 'Hostedai team terminated successfully.']);
-        }
-
+        // Log and return the real API response — never fabricate a body.
+        // Success/failure is determined by the HTTP code, not the body.
         logModuleCall("Hostedai", $action, $data, json_decode($response));
 
         return ['httpcode' => $httpCode, 'result' => json_decode($response)];
