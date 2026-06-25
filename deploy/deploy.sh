@@ -35,10 +35,20 @@ cd "${REPO_ROOT}"
 
 # ── Lock — prevent concurrent deploys to the same host ────────────────────
 LOCK_FILE="/tmp/whmcs-deploy-$(echo "${SSH_HOST}" | tr -dc '[:alnum:]').lock"
-exec 9>"${LOCK_FILE}"
-if ! flock -n 9; then
-    echo "Error: another deploy to ${SSH_HOST} is already running (${LOCK_FILE})" >&2
-    exit 1
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"${LOCK_FILE}"
+    if ! flock -n 9; then
+        echo "Error: another deploy to ${SSH_HOST} is already running (${LOCK_FILE})" >&2
+        exit 1
+    fi
+else
+    # macOS fallback: mkdir is atomic
+    LOCK_DIR="${LOCK_FILE}.d"
+    if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+        echo "Error: another deploy to ${SSH_HOST} is already running (${LOCK_DIR})" >&2
+        exit 1
+    fi
+    trap 'rmdir "${LOCK_DIR}" 2>/dev/null || true; '"$(trap -p EXIT | sed "s/.*'\(.*\)'.*/\1/")" EXIT
 fi
 
 # ── SSH ControlMaster — reuse a single connection for all operations ───────
@@ -108,11 +118,11 @@ else
     if [ -f "${LAST_DEPLOYED_FILE}" ]; then
         LAST_HASH=$(cat "${LAST_DEPLOYED_FILE}")
         while IFS= read -r line; do [ -n "$line" ] && FILES+=("$line"); done \
-            < <(git diff --name-only "${LAST_HASH}" HEAD -- '*.php' '*.tpl' '*.css' '*.js' 2>/dev/null || true)
+            < <(git diff --name-only "${LAST_HASH}" HEAD -- '*.php' '*.tpl' '*.css' '*.js' '*.svg' '*.png' 2>/dev/null || true)
     else
         # First deploy — take everything tracked
         while IFS= read -r line; do [ -n "$line" ] && FILES+=("$line"); done \
-            < <(git ls-files -- '*.php' '*.tpl' '*.css' '*.js')
+            < <(git ls-files -- '*.php' '*.tpl' '*.css' '*.js' '*.svg' '*.png')
     fi
 fi
 
