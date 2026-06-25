@@ -15,6 +15,15 @@ if (!empty($whmcspath)) {
 
 $helper = new Helper();
 
+// Process lock — prevents two cron instances from running concurrently and
+// double-billing the same hour when the scheduler fires twice in quick succession.
+$lockFile = sys_get_temp_dir() . '/hostedai_hourly_cron.lock';
+$lockFd   = fopen($lockFile, 'c');
+if (!$lockFd || !flock($lockFd, LOCK_EX | LOCK_NB)) {
+    logActivity('HostedAI Hourly Cron: already running, exiting.');
+    exit(0);
+}
+
 // 55 min = hourly cron interval (60 min) minus a 5-min overlap buffer.
 // Keeps billing idempotent when the cron scheduler fires slightly early or two
 // processes overlap at the start of an hour.
@@ -130,4 +139,9 @@ try {
 
 } catch (\Exception $e) {
     logActivity("Exception in HostedAI Hourly Cron: " . $e->getMessage());
+} finally {
+    if (isset($lockFd) && $lockFd) {
+        flock($lockFd, LOCK_UN);
+        fclose($lockFd);
+    }
 }

@@ -274,9 +274,9 @@ function hostedai_TestConnection(array $params)
     } catch (Exception $e) {
         // Record the error in WHMCS's module log.
         logModuleCall(
-            'openprovider_plesk_license',
+            'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -378,7 +378,7 @@ function hostedai_CreateAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -417,7 +417,7 @@ function hostedai_SuspendAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -455,7 +455,7 @@ function hostedai_UnsuspendAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -499,7 +499,7 @@ function hostedai_TerminateAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -537,7 +537,7 @@ function hostedai_ChangePackage(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -658,10 +658,10 @@ function hostedai_AdminServicesTabFields(array $params)
                     
                     $members = $getTeamMembers['result']->members;
                     foreach ($members as $member) {
-                        $teamEmail = $member->user->email ?? '';
-                        $teamStatus = $member->status ?? '';
-                        $teamRole = $member->role->label ?? '';
-        
+                        $teamEmail  = htmlspecialchars($member->user->email ?? '', ENT_QUOTES, 'UTF-8');
+                        $teamStatus = htmlspecialchars($member->status ?? '', ENT_QUOTES, 'UTF-8');
+                        $teamRole   = htmlspecialchars($member->role->label ?? '', ENT_QUOTES, 'UTF-8');
+
                         $teamMemberHTML .= '<tbody>
                                 <tr>
                                     <td>' . $teamEmail . '</td>
@@ -706,13 +706,14 @@ function hostedai_AdminServicesTabFields(array $params)
                                 $used = $resource->used . " " . $unit . " (".$percentage."%)";
                             }
                             
-                            $imagePath = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets/images/".$resourceType.".svg";
-            
+                            $safeType  = htmlspecialchars($resourceType, ENT_QUOTES, 'UTF-8');
+                            $imagePath = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets/images/" . $safeType . ".svg";
+
                             $resourceHTML .= '<div class="col-lg-6 mt-2">
                                     <div class="overview-card">
                                         <div class="overview-card-header">
-                                            <img src="'. $imagePath .'" alt="'. $resourceType .'">
-                                            <h3>'.strtoupper($resourceType).'</h3>
+                                            <img src="'. $imagePath .'" alt="'. $safeType .'">
+                                            <h3>'.strtoupper($safeType).'</h3>
                                         </div>
                                         <div class="overview-card-detail">
                                             <p>'.$used.'</p>
@@ -788,7 +789,7 @@ function hostedai_AdminServicesTabFields(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -841,7 +842,7 @@ function hostedai_AdminServicesTabFieldsSave(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -956,7 +957,7 @@ function hostedai_ClientArea(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );

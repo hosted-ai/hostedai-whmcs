@@ -541,7 +541,7 @@ class Helper
 
             $results = localAPI($command, $postData);
 
-            if ($command = 'ModuleTerminate') {
+            if ($command == 'ModuleTerminate') {
                 if ($results['httpcode'] == 200 && $results['result'] == 'success') {
                     $this->delete_teamDetail($serviceId, $pid);
                 }
@@ -711,6 +711,8 @@ class Helper
 
         curl_setopt($curl, CURLOPT_URL, $baseUrl . $endpoint);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($curl, CURLOPT_MAXREDIRS, 10);
         curl_setopt($curl, CURLOPT_TIMEOUT, 10); //timeout in seconds
