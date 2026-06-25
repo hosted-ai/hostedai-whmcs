@@ -52,8 +52,6 @@ cp -rv modules/ /<whmcs_path>/
 'modules/servers/hostedai/lib/ajax.php' -> '../modules/servers/hostedai/lib/ajax.php'
 'modules/servers/hostedai/lib/index.php' -> '../modules/servers/hostedai/lib/index.php'
 'modules/servers/hostedai/templates' -> '../modules/servers/hostedai/templates'
-'modules/servers/hostedai/templates/admin' -> '../modules/servers/hostedai/templates/admin'
-'modules/servers/hostedai/templates/admin/manage.tpl__bkp' -> '../modules/servers/hostedai/templates/admin/manage.tpl__bkp'
 'modules/servers/hostedai/templates/error.tpl' -> '../modules/servers/hostedai/templates/error.tpl'
 'modules/servers/hostedai/templates/index.php' -> '../modules/servers/hostedai/templates/index.php'
 'modules/servers/hostedai/templates/manage.tpl' -> '../modules/servers/hostedai/templates/manage.tpl'
