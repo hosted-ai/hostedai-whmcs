@@ -1,7 +1,5 @@
 {assign var=unique_id value=10|mt_rand:20}
 <link href="{$assets}/css/style.css?v={$unique_id}" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/validator/13.7.0/validator.min.js"></script>
-
 <script src="{$assets}/js/custom.js?v={$unique_id}"></script>
 <div class="container">
 

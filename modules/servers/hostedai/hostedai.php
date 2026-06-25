@@ -259,17 +259,21 @@ function hostedai_ConfigOptions(array $params)
  */
 function hostedai_TestConnection(array $params)
 {
-    
+    $success  = false;
+    $errorMsg = '';
+
     try {
 
         $helper = new Helper($params);
         $getPricingPolicy = $helper->getPolicyItems('pricing-policy');
-        if($getPricingPolicy['httpcode'] == 200){
-         
+
+        if (is_array($getPricingPolicy) && ($getPricingPolicy['httpcode'] ?? 0) == 200) {
             $success = true;
-        }
-        else{
-            $errorMsg = $getPricingPolicy['result']->message;
+        } else {
+            $result   = is_array($getPricingPolicy) ? ($getPricingPolicy['result'] ?? null) : null;
+            $errorMsg = (is_object($result) && isset($result->message))
+                ? $result->message
+                : 'Unable to connect to the hosted·ai API.';
         }
     } catch (Exception $e) {
         // Record the error in WHMCS's module log.
@@ -730,7 +734,6 @@ function hostedai_AdminServicesTabFields(array $params)
                 
                         $informationHtml = '
                         <link href="' . $assets . '/css/style.css?v=' . $random . '" rel="stylesheet">
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/validator/13.7.0/validator.min.js"></script>
                         <script src="' . $assets . '/js/custom.js?v=' . $random . '"></script>
                 
                         <table class="ad_on_table_dash table table-striped" width="100%" cellspacing="0" cellpadding="0" border="0">
@@ -883,8 +886,6 @@ function hostedai_ClientArea(array $params)
         if($key != '') {
             $getTeamdata = $helper->getTeamDetail($key);
 
-            $getTeamdata = $helper->getTeamDetail($key);
-    
             if($getTeamdata && $getTeamdata['httpcode'] == 200)
             {
                 $getTeamMembers = $helper->getTeamMembers($key);
