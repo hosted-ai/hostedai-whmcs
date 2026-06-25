@@ -2,6 +2,11 @@
 
 Integrate your WHMCS Billing platform with hosted·ai
 
+> 📘 **Full reference:** see the [Administrator Guide](docs/ADMINISTRATOR_GUIDE.md)
+> for billing modes (monthly & prepaid wallet), cron jobs, low-balance alerts,
+> auto-suspend/unsuspend, the admin wallet tab, the database schema, and
+> troubleshooting.
+
 ## Uploading Module Files
 
 Download the `main.zip` file and SCP to your WHMCS server, or clone it directly from github with the following command from within your WHMCS web directory. To grab the latest version:
