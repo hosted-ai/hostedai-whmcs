@@ -351,30 +351,36 @@ function hostedai_CreateAccount(array $params)
         ];
         
 
-        if(isset($teamId) && $teamId != '')
-        {
+        // Team already provisioned for this service — nothing to do.
+        if (isset($teamId) && $teamId != '') {
+            return 'success';
+        }
 
-        }else{
-            
-            $getResponse = $helper->createHostedaiTeam($postData);
-            
-            if($getResponse['httpcode'] == 200)
-            {
+        $getResponse = $helper->createHostedaiTeam($postData);
 
-                if (isset($getResponse['result']->id)) {
-                    $teamId = $getResponse['result']->id;
+        if (!is_array($getResponse) || ($getResponse['httpcode'] ?? 0) != 200 || !isset($getResponse['result']->id)) {
+            return (is_array($getResponse) && isset($getResponse['result']->message))
+                ? $getResponse['result']->message
+                : 'Failed to create hosted·ai team.';
+        }
 
-                    $fields = ["team_id" => $teamId];
-                    $helper->insert_hostedai_custom_fields_value($serviceId, $pid, $fields);
+        $teamId      = $getResponse['result']->id;
+        $billingMode = $params['configoption10'] ?: 'monthly';
+        $helper->ensureWalletColumns();
 
-                    $billingMode = $params['configoption10'] ?: 'monthly';
-                    $helper->ensureWalletColumns();
-                    $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert', $billingMode);
-                }
-                
-            }else{
-                return $getResponse['result']->message;
-            }
+        // Record the team linkage in WHMCS. The team already exists upstream at
+        // this point, so if either local write fails we remove it — leaving an
+        // orphaned hosted·ai team while reporting success would cause a duplicate
+        // team on the next provisioning retry.
+        $cfResult = $helper->insert_hostedai_custom_fields_value($serviceId, $pid, ["team_id" => $teamId]);
+        $tdResult = $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert', $billingMode);
+
+        if ($cfResult !== 'success' || $tdResult !== true) {
+            logActivity("hostedai CreateAccount: WHMCS linkage failed after creating team {$teamId} — rolling back");
+            $helper->terminateHostedaiTeam($teamId);
+            $helper->delete_teamDetail($serviceId, $pid);
+            $helper->insert_hostedai_custom_fields_value($serviceId, $pid, ["team_id" => '']);
+            return 'Provisioning failed: could not record team details in WHMCS.';
         }
 
     } catch (Exception $e) {

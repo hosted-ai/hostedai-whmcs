@@ -662,8 +662,11 @@ class Helper
                         'updated_at' => date('Y-m-d H:i:s'),
                     ]);
             }
+
+            return true;
         } catch (\Exception $e) {
             logActivity('Function (insert_teamDetail) Hostedai Error: ' . $e->getMessage());
+            return false;
         }
     }
 
