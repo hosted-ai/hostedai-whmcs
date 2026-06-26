@@ -200,36 +200,9 @@ try {
                     }
                 }
 
-                // Add Team Metrics billing (if available)
-                if (!empty($responseData->team_metrics)) {
-                    $teamMetricsArray = (array)$responseData->team_metrics;
-                    $teamMetricsInterval = reset($teamMetricsArray);
-                    
-                    $teamRAM = number_format($teamMetricsInterval->RAM ?? 0, 2);
-                    $teamCPU = number_format($teamMetricsInterval->CPU ?? 0, 2);
-                    $teamGPU = number_format($teamMetricsInterval->GPU ?? 0, 2);
-                    $teamGRAM = number_format($teamMetricsInterval->GRAM ?? 0, 2);
-                    $teamTFlops = number_format($teamMetricsInterval->TFlops ?? 0, 2);
-                    $teamTotal = number_format($teamMetricsInterval->total_cost ?? 0, 2);
-
-                    if ($teamTotal > 0) {
-                        $description = <<<DESC
-                        Team-Level Resource Usage
-                        RAM ..................................... \$ {$teamRAM}
-                        CPU ..................................... \$ {$teamCPU}
-                        GPU ..................................... \$ {$teamGPU}
-                        GRAM .................................... \$ {$teamGRAM}
-                        TFlops .................................. \$ {$teamTFlops}
-                        DESC;
-
-                        $invoiceItems["itemdescription{$itemCount}"] = $description;
-                        $invoiceItems["itemamount{$itemCount}"] = $teamMetricsInterval->total_cost; // Use raw float for invoice
-                        $invoiceItems["itemtaxed{$itemCount}"] = true;
-
-                        $totalWithoutTax += $teamMetricsInterval->total_cost;
-                        $itemCount++;
-                    }
-                }
+                // Team Metrics billing is handled in the "ALWAYS process" section below.
+                // group-by-workspace does NOT return team_metrics, so it must be fetched
+                // from the detailed team-billing endpoint (generateDetailedTeamBill).
                 }
                 } else {
                     logActivity("No workspace billing data found for TeamID {$team->teamid}");
@@ -317,6 +290,46 @@ try {
                 }
             } else {
                 logActivity("GPUaaS pool billing failed or empty for TeamID {$team->teamid} - HTTP Code: " . ($gpuaasPoolResponse['httpcode'] ?? 'unknown'));
+            }
+
+            // ALWAYS process Team Metrics billing (team-level GPUaaS consumption).
+            // team_metrics is consumption-based (avg RAM/CPU/GPU/GRAM/TFlops from
+            // team_metrics_daily), a SEPARATE category from pool subscriptions
+            // (gpuaas-pool) and per-instance billing — no double-counting. It is
+            // only returned by the detailed team-billing endpoint, not by
+            // group-by-workspace, so it must be fetched separately.
+            $teamMetricsResponse = $helper->generateDetailedTeamBill($team->teamid);
+            if ($teamMetricsResponse['httpcode'] === 200 && !empty($teamMetricsResponse['result']->team_metrics)) {
+                $teamMetricsArray    = (array)$teamMetricsResponse['result']->team_metrics;
+                $teamMetricsInterval = reset($teamMetricsArray);
+
+                $teamMetricsTotal = floatval($teamMetricsInterval->total_cost ?? 0);
+                if ($teamMetricsTotal > 0) {
+                    $teamRAM    = number_format($teamMetricsInterval->RAM ?? 0, 2);
+                    $teamCPU    = number_format($teamMetricsInterval->CPU ?? 0, 2);
+                    $teamGPU    = number_format($teamMetricsInterval->GPU ?? 0, 2);
+                    $teamGRAM   = number_format($teamMetricsInterval->GRAM ?? 0, 2);
+                    $teamTFlops = number_format($teamMetricsInterval->TFlops ?? 0, 2);
+
+                    $description = <<<DESC
+                    Team-Level Resource Usage
+                    RAM ..................................... \$ {$teamRAM}
+                    CPU ..................................... \$ {$teamCPU}
+                    GPU ..................................... \$ {$teamGPU}
+                    GRAM .................................... \$ {$teamGRAM}
+                    TFlops .................................. \$ {$teamTFlops}
+                    DESC;
+
+                    $invoiceItems["itemdescription{$itemCount}"] = $description;
+                    $invoiceItems["itemamount{$itemCount}"]      = $teamMetricsInterval->total_cost;
+                    $invoiceItems["itemtaxed{$itemCount}"]       = true;
+
+                    $totalWithoutTax += $teamMetricsTotal;
+                    $itemCount++;
+                    logActivity("Team metrics billing for TeamID {$team->teamid}: \${$teamMetricsTotal}");
+                }
+            } else {
+                logActivity("Team metrics billing empty for TeamID {$team->teamid} - HTTP Code: " . ($teamMetricsResponse['httpcode'] ?? 'unknown'));
             }
 
             // Generate Invoice only if there are any costs
