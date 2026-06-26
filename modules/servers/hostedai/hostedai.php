@@ -816,7 +816,9 @@ function hostedai_AdminServicesTabFieldsSave(array $params)
 {
     try {
         $serviceId = $params['serviceid'];
-        $newMode   = $params['billing_mode_switch'] ?? null;
+        // WHMCS delivers custom admin-tab fields via $_REQUEST, not $params.
+        // Fall back to $params for programmatic/test callers.
+        $newMode   = $_REQUEST['billing_mode_switch'] ?? $params['billing_mode_switch'] ?? null;
 
         if (!in_array($newMode, ['monthly', 'prepaid'], true)) {
             return;
