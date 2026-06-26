@@ -731,7 +731,9 @@ class Helper
         curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($curl, CURLOPT_MAXREDIRS, 10);
-        curl_setopt($curl, CURLOPT_TIMEOUT, 10); //timeout in seconds
+        // 30s total — team creation/provisioning can take longer than a read.
+        // CONNECTTIMEOUT (5s) still fails fast if the host is unreachable.
+        curl_setopt($curl, CURLOPT_TIMEOUT, 30); //timeout in seconds
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, 1);
         if (isset($this->token) && $this->token != '')
             curl_setopt($curl, CURLOPT_HTTPHEADER, array('accept: application/json', 'Content-Type: application/json', 'x-api-key: ' . $this->token));
