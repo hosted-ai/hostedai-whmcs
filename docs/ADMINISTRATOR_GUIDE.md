@@ -151,10 +151,18 @@ product.
 
 1. On the **Details** tab, set *Module Name* to `hostedai`.
 2. On the **Module Settings** tab, select the server group created above.
-3. Once the server group is selected, the dropdowns in configoptions 1–6 populate
-   from the hosted·ai API. Fill them in as described in the next section.
+3. Click **Save Changes**. The policy dropdowns (configoptions 1–6) now populate from
+   the hosted·ai server in that group. Fill them in as described in the next section.
 4. Set **configoption10** (Billing Mode) and **configoption11** (Min Wallet Balance)
-   according to how you want this product billed.
+   according to how you want this product billed, then **Save Changes** again.
+
+> **Important — save before the policies appear.** The policy dropdowns load from the
+> server group **stored on the saved product**. On a brand-new product (or before the
+> first save), the group is not yet persisted, so the module falls back to the *first
+> enabled hosted·ai server* and shows **that** server's policies — which is why you may
+> see policies that don't match the group you just picked. Always select the module and
+> server group, **Save Changes**, then re-open Module Settings to see the correct
+> policies.
 
 > **Note:** The module creates the `team_id` custom field (type: Text, admin-only)
 > automatically the first time you open the product's **Module Settings** tab — no
@@ -448,6 +456,13 @@ on first provisioning; `ensureWalletColumns()` (called by the hourly cron) adds
 **Test Connection fails.** Verify the server's hostname and API token. The token
 must have admin-level privileges. Check that the WHMCS server can reach the
 hosted·ai API over HTTPS (port 443).
+
+**Wrong policies appear in the dropdowns (from another server).** The policy
+dropdowns load from the server group saved on the product. If the product has not been
+saved with its server group yet, the module falls back to the first enabled hosted·ai
+server and shows that server's policies. Select Module Name + Server Group on the
+**Module Settings** tab, click **Save Changes**, then re-open the tab — the dropdowns
+will reload from the correct server.
 
 **team_id is empty after provisioning.** The `team_id` custom field is created
 automatically when the product's **Module Settings** tab is first opened. If
