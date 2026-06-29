@@ -15,6 +15,28 @@ if (!empty($whmcspath)) {
 
 $helper = new Helper();
 
+/**
+ * Build a Helper bound to the hosted·ai server the given service is provisioned on.
+ * Each WHMCS service may live on a different hosted·ai cluster; a parameter-less
+ * `new Helper()` falls back to the first enabled hostedai server and would query the
+ * wrong cluster (team-not-found → zero billing). Returns null if no server is found.
+ */
+function hostedaiHelperForService($sid)
+{
+    $service = Capsule::table('tblhosting')->where('id', $sid)->first();
+    if (!$service) {
+        return null;
+    }
+    $server = Capsule::table('tblservers')->where('id', $service->server)->first();
+    if (!$server || empty($server->hostname)) {
+        return null;
+    }
+    return new Helper([
+        'serverhostname' => $server->hostname,
+        'serverpassword' => decrypt($server->password),
+    ]);
+}
+
 // Process lock — prevents two cron instances from running concurrently and
 // double-billing the same hour when the scheduler fires twice in quick succession.
 $lockFile = sys_get_temp_dir() . '/hostedai_hourly_cron.lock';
@@ -41,6 +63,14 @@ try {
 
     foreach ($teams as $team) {
 
+        // Bind the API helper to the cluster this service actually lives on. Without
+        // this, billing queries hit the wrong hosted·ai server and silently return zero.
+        $teamHelper = hostedaiHelperForService($team->sid);
+        if (!$teamHelper) {
+            logActivity("Hourly cron: No server found for service {$team->sid} (TeamID {$team->teamid}), skipping");
+            continue;
+        }
+
         // Billing phase — guarded by CRON_OVERLAP_GUARD_MINUTES to prevent double-billing
         // when two cron processes overlap. API errors also skip the balance check since
         // we can't know the post-billing balance in that case.
@@ -58,7 +88,7 @@ try {
         if ($shouldBill) {
             logActivity("Hourly cron: Processing billing for TeamID {$team->teamid} (UID {$team->uid})");
 
-            $response = $helper->generateHourlyBill($team->teamid);
+            $response = $teamHelper->generateHourlyBill($team->teamid);
 
             if ($response['httpcode'] !== 200) {
                 logActivity("Hourly cron: API error for TeamID {$team->teamid}, HTTP {$response['httpcode']}");

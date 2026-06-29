@@ -15,6 +15,28 @@ if (!empty($whmcspath)) {
 
 $helper = new Helper();
 
+/**
+ * Build a Helper bound to the hosted·ai server the given service is provisioned on.
+ * Each WHMCS service may live on a different hosted·ai cluster; a parameter-less
+ * `new Helper()` falls back to the first enabled hostedai server and would query the
+ * wrong cluster (team-not-found → zero billing). Returns null if no server is found.
+ */
+function hostedaiHelperForService($sid)
+{
+    $service = Capsule::table('tblhosting')->where('id', $sid)->first();
+    if (!$service) {
+        return null;
+    }
+    $server = Capsule::table('tblservers')->where('id', $service->server)->first();
+    if (!$server || empty($server->hostname)) {
+        return null;
+    }
+    return new Helper([
+        'serverhostname' => $server->hostname,
+        'serverpassword' => decrypt($server->password),
+    ]);
+}
+
 try {
     logActivity("HostedAI Cron started on " . date('Y-m-d H:i:s'));
 
@@ -38,8 +60,16 @@ try {
         foreach ($teams as $team) {
             // Production: Basic processing log (debug info removed for security)
             logActivity("Processing billing for TeamID {$team->teamid}");
-            
-            $response = $helper->generateBill($team->teamid);
+
+            // Bind the API helper to the cluster this service actually lives on. Without
+            // this, billing queries hit the wrong hosted·ai server and silently return zero.
+            $teamHelper = hostedaiHelperForService($team->sid);
+            if (!$teamHelper) {
+                logActivity("No server found for service {$team->sid} (TeamID {$team->teamid}), skipping");
+                continue;
+            }
+
+            $response = $teamHelper->generateBill($team->teamid);
             logActivity("Billing response for TeamID {$team->teamid}: " . json_encode($response));
 
             // Always initialize invoice items regardless of main billing response
@@ -212,7 +242,7 @@ try {
             }
 
             // ALWAYS process Shared Storage billing (regardless of main billing status)
-            $sharedStorageResponse = $helper->getTeamSharedStorageBilling($team->teamid);
+            $sharedStorageResponse = $teamHelper->getTeamSharedStorageBilling($team->teamid);
             if ($sharedStorageResponse['httpcode'] === 200 && !empty($sharedStorageResponse['result'])) {
                 $sharedStorageData = $sharedStorageResponse['result'];
                 logActivity("Shared storage billing for TeamID {$team->teamid}: " . json_encode($sharedStorageData));
@@ -247,7 +277,7 @@ try {
             }
 
             // ALWAYS process Enhanced GPUaaS Pool billing with Ephemeral Storage (regardless of main billing status)
-            $gpuaasPoolResponse = $helper->getTeamGpuaasPoolBilling($team->teamid);
+            $gpuaasPoolResponse = $teamHelper->getTeamGpuaasPoolBilling($team->teamid);
             if ($gpuaasPoolResponse['httpcode'] === 200 && !empty($gpuaasPoolResponse['result'])) {
                 $gpuaasPoolData = $gpuaasPoolResponse['result'];
                 logActivity("GPUaaS pool billing for TeamID {$team->teamid}: " . json_encode($gpuaasPoolData));
@@ -298,7 +328,7 @@ try {
             // (gpuaas-pool) and per-instance billing — no double-counting. It is
             // only returned by the detailed team-billing endpoint, not by
             // group-by-workspace, so it must be fetched separately.
-            $teamMetricsResponse = $helper->generateDetailedTeamBill($team->teamid);
+            $teamMetricsResponse = $teamHelper->generateDetailedTeamBill($team->teamid);
             if ($teamMetricsResponse['httpcode'] === 200 && !empty($teamMetricsResponse['result']->team_metrics)) {
                 $teamMetricsArray    = (array)$teamMetricsResponse['result']->team_metrics;
                 $teamMetricsInterval = reset($teamMetricsArray);
