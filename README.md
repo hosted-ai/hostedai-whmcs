@@ -2,6 +2,11 @@
 
 Integrate your WHMCS Billing platform with hosted·ai
 
+> 📘 **Full reference:** see the [Administrator Guide](docs/ADMINISTRATOR_GUIDE.md)
+> for billing modes (monthly & prepaid wallet), cron jobs, low-balance alerts,
+> auto-suspend/unsuspend, the admin wallet tab, the database schema, and
+> troubleshooting.
+
 ## Uploading Module Files
 
 Download the `main.zip` file and SCP to your WHMCS server, or clone it directly from github with the following command from within your WHMCS web directory. To grab the latest version:
@@ -52,8 +57,6 @@ cp -rv modules/ /<whmcs_path>/
 'modules/servers/hostedai/lib/ajax.php' -> '../modules/servers/hostedai/lib/ajax.php'
 'modules/servers/hostedai/lib/index.php' -> '../modules/servers/hostedai/lib/index.php'
 'modules/servers/hostedai/templates' -> '../modules/servers/hostedai/templates'
-'modules/servers/hostedai/templates/admin' -> '../modules/servers/hostedai/templates/admin'
-'modules/servers/hostedai/templates/admin/manage.tpl__bkp' -> '../modules/servers/hostedai/templates/admin/manage.tpl__bkp'
 'modules/servers/hostedai/templates/error.tpl' -> '../modules/servers/hostedai/templates/error.tpl'
 'modules/servers/hostedai/templates/index.php' -> '../modules/servers/hostedai/templates/index.php'
 'modules/servers/hostedai/templates/manage.tpl' -> '../modules/servers/hostedai/templates/manage.tpl'
