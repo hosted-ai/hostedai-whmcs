@@ -64,8 +64,10 @@ mechanisms use it: **initial wallet credit** on provision (grant or invoice) and
 1. Product is set with **Module Name = `hostedai`**, a **Server Group**, the five
    policies, and **Billing Mode** (`configoption10`).
 2. Order → **Accept Order** → **ModuleCreate** → `hostedai_CreateAccount`:
-   creates the team on hosted·ai, stores the `team_id` custom field, and inserts a
-   row into `mod_hostdaiteam_details` with the billing mode.
+   creates the team on hosted·ai, stores the `team_id` custom field, inserts a
+   row into `mod_hostdaiteam_details` with the billing mode, and (prepaid only)
+   seeds the wallet if **Initial Wallet Credit** (`configoption12/13`) is set —
+   see §4.
 3. The **billing cadence is driven by the cron + `billing_mode`**, not by the
    WHMCS product billing cycle: monthly → 1st of month; prepaid → hourly.
 
@@ -83,12 +85,22 @@ created, the module rolls the team back so a retry starts clean.
 - Payment reminders (dunning) are stock WHMCS automated emails.
 
 **Prepaid mode** (no debt by design)
+- **Initial credit** (`configoption12/13`) — on provision the wallet is seeded so
+  a new account doesn't start at $0: `grant` tops it up for free, `invoice` raises
+  an Add Funds invoice the client pays.
+- **Auto top-up** (`configoption14/15`) — when the balance drops below the top-up
+  threshold, the hourly cron raises an Add Funds invoice (deduped per client) so
+  the wallet is refilled before it hits the suspend threshold; with a saved
+  auto-capture pay method WHMCS charges it automatically.
 - Balance ≤ `min_balance` (`configoption11`) → hourly cron **suspends**
   (`suspended_reason = balance_zero`).
-- Balance between 1× and 2× the threshold → **low-balance warning email**, at most
+- Balance between 1× and 2× `min_balance` → **low-balance warning email**, at most
   once per 24h (tracked by `low_balance_notified_at`).
 - **Auto-unsuspend**: the `InvoicePaid` hook re-activates a `balance_zero`
-  service once an invoice is paid **and** the wallet is above the threshold.
+  service once an invoice is paid **and** the wallet is above the threshold. This
+  fires for Add Funds top-ups too (WHMCS credits the wallet on payment).
+- Balance/top-up/suspend run even if the service's hosted·ai server is
+  unavailable — only usage billing is skipped.
 
 **Cancellation / termination**
 - **ModuleTerminate** deletes the hosted·ai team, clears the `team_id` custom
@@ -101,10 +113,10 @@ created, the module rolls the team back so a retry starts clean.
 | Component | Path | Purpose |
 |---|---|---|
 | Server module | `modules/servers/hostedai/hostedai.php` | Create / Suspend / Unsuspend / Terminate / ChangePackage / ConfigOptions / ClientArea / AdminServicesTab |
-| API client | `modules/servers/hostedai/lib/Helper.php` | All hosted·ai REST calls + the custom billing table helpers |
+| API client | `modules/servers/hostedai/lib/Helper.php` | All hosted·ai REST calls + billing-table helpers + `createAddFundsInvoice()` / `hasOpenAddFundsInvoice()` (wallet funding) |
 | Wallet hook | `includes/hooks/hostedai_wallet.php` | `InvoicePaid` → auto-unsuspend prepaid services after top-up |
 | Monthly cron | `crons/hostedai_cron.php` | End-of-month usage invoice (monthly mode) |
-| Hourly cron | `crons/hostedai_hourly_cron.php` | Hourly usage deduction + balance checks (prepaid mode) |
+| Hourly cron | `crons/hostedai_hourly_cron.php` | Hourly usage deduction, balance checks, auto top-up (prepaid mode) |
 | OTL login | `modules/servers/hostedai/lib/ajax.php` | One-time login into the hosted·ai panel (auth + ownership enforced) |
 | Custom table | `mod_hostdaiteam_details` | Links a WHMCS service to a hosted·ai team + billing state |
 | Custom field | `team_id` (per product) | Stores the hosted·ai team id; auto-created by ConfigOptions |
