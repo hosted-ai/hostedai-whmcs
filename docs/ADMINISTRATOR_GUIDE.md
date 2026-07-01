@@ -174,7 +174,7 @@ product.
 
 ## Module Options
 
-All eleven configoptions appear on the product's **Module Settings** tab.
+All configoptions appear on the product's **Module Settings** tab.
 
 | # | Label | Type | Description |
 |---|---|---|---|
@@ -189,6 +189,46 @@ All eleven configoptions appear on the product's **Module Settings** tab.
 | 9 | No. of Termination Days | Text | Days after suspension before the service is terminated. |
 | **10** | **Billing Mode** | Dropdown | Default billing mode for new services: `monthly` or `prepaid`. Can be overridden per-service by an admin after provisioning. |
 | **11** | **Min Wallet Balance ($)** | Text | Prepaid mode only. Services are suspended when the client's wallet falls to or below this amount. Low-balance warnings fire when balance falls below 2× this value. Default: `1.00`. |
+| **12** | **Initial Wallet Credit ($)** | Text | Prepaid only. On provision, seed the wallet up to this amount so the account does not start at $0 (0/blank = off). See [Wallet Funding](#wallet-funding). |
+| **13** | **Initial Credit Mode** | Dropdown | `grant` = add the credit for free (trial/demo); `invoice` = raise an Add Funds invoice the client must pay. |
+| **14** | **Auto Top-Up Threshold ($)** | Text | Prepaid only. When the wallet drops below this, auto-raise a top-up invoice (0/blank = off). Set **above** Min Wallet Balance so it fires before suspension. |
+| **15** | **Auto Top-Up Amount ($)** | Text | Amount of the auto top-up (Add Funds) invoice. |
+
+> **Config options are positional.** Options 12–15 are appended after Min Wallet
+> Balance; never reorder or insert options above existing ones or saved product
+> values will shift.
+
+---
+
+## Wallet Funding
+
+Two optional mechanisms keep prepaid wallets funded. Both use WHMCS **Add Funds**
+invoices, so paying them credits the wallet natively (deposit recorded once — no
+double-counted revenue). Both are per-product and off by default.
+
+### Initial wallet credit (configoption12 / 13)
+
+So a new prepaid account does not start at $0 and suspend on the first hourly
+cron:
+
+- **`grant`** — on provision the module tops the wallet **up to** the configured
+  amount for free (won't stack if the shared wallet already has funds). Best for
+  trials/demos.
+- **`invoice`** — on provision the module raises an Add Funds invoice for the
+  amount; the client pays it to fund the wallet (and the service auto-unsuspends
+  via the InvoicePaid hook once paid).
+
+### Auto top-up (configoption14 / 15)
+
+When the hourly cron sees a prepaid wallet drop **below the top-up threshold**, it
+raises an Add Funds invoice for the top-up amount (and emails it), unless the
+client already has an open Add Funds invoice (dedup is per client, since credit is
+shared). If the client has a saved pay method with auto-capture, WHMCS charges it
+automatically — true auto-replenishment. Set the threshold **above** Min Wallet
+Balance so top-up happens before suspension.
+
+> The balance check, auto top-up and suspension run even when a service's hosted·ai
+> server is unavailable — only usage billing is skipped in that case.
 
 ---
 

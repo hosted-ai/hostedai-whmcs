@@ -240,6 +240,33 @@ function hostedai_ConfigOptions(array $params)
             'Default' => '1.00',
             'Description' => 'Suspend when wallet drops to or below this amount (prepaid mode only)',
         ),
+        // NOTE: options below are APPEND-ONLY. WHMCS maps config options to
+        // configoption{N} by position — never insert new options above this line
+        // or existing products' saved values will shift.
+        'initial_wallet_credit' => array(
+            'FriendlyName' => 'Initial Wallet Credit ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Description' => 'On provision, seed the prepaid wallet up to this amount (0/blank = off).',
+        ),
+        'initial_credit_mode' => array(
+            'FriendlyName' => 'Initial Credit Mode',
+            'Type' => 'dropdown',
+            'Options' => 'grant,invoice',
+            'Description' => 'grant = add credit for free (trial/demo); invoice = raise an Add Funds invoice the client must pay.',
+        ),
+        'auto_topup_threshold' => array(
+            'FriendlyName' => 'Auto Top-Up Threshold ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Description' => 'When wallet drops below this, auto-raise a top-up invoice (0/blank = off). Set above Min Wallet Balance.',
+        ),
+        'auto_topup_amount' => array(
+            'FriendlyName' => 'Auto Top-Up Amount ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Description' => 'Amount of the auto top-up (Add Funds) invoice.',
+        ),
 
     );
 
@@ -381,6 +408,32 @@ function hostedai_CreateAccount(array $params)
             $helper->delete_teamDetail($serviceId, $pid);
             $helper->insert_hostedai_custom_fields_value($serviceId, $pid, ["team_id" => '']);
             return 'Provisioning failed: could not record team details in WHMCS.';
+        }
+
+        // Initial wallet credit (prepaid only) so the account does not start at $0.
+        // grant   = add credit for free, topping the wallet UP TO the amount
+        //           (won't stack if the shared wallet already has funds).
+        // invoice = raise an Add Funds invoice the client must pay to activate.
+        if ($billingMode === 'prepaid') {
+            $initialCredit = floatval($params['configoption12'] ?? 0);
+            if ($initialCredit > 0) {
+                $mode = ($params['configoption13'] ?? 'grant') === 'invoice' ? 'invoice' : 'grant';
+                if ($mode === 'invoice') {
+                    $helper->createAddFundsInvoice($userId, $initialCredit);
+                    logActivity("hostedai CreateAccount: raised initial Add Funds invoice \${$initialCredit} for UID {$userId}");
+                } else {
+                    $current = $helper->getClientCreditBalance($userId) ?? 0;
+                    $gap = round($initialCredit - $current, 2);
+                    if ($gap > 0) {
+                        localAPI('AddCredit', [
+                            'clientid'    => $userId,
+                            'amount'      => $gap,
+                            'description' => 'hosted·ai initial wallet credit',
+                        ]);
+                        logActivity("hostedai CreateAccount: granted initial credit \${$gap} to UID {$userId} (wallet -> \${$initialCredit})");
+                    }
+                }
+            }
         }
 
     } catch (Exception $e) {

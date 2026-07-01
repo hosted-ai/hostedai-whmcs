@@ -63,21 +63,23 @@ try {
 
     foreach ($teams as $team) {
 
-        // Bind the API helper to the cluster this service actually lives on. Without
-        // this, billing queries hit the wrong hosted·ai server and silently return zero.
+        // Bind the API helper to the cluster this service lives on. Usage billing
+        // needs it, but the balance check / auto top-up / suspension are WHMCS-side
+        // (localAPI) and must still run even when the server is missing — otherwise a
+        // service whose server was deleted/disabled would never suspend or top up.
         $teamHelper = hostedaiHelperForService($team->sid);
-        if (!$teamHelper) {
-            logActivity("Hourly cron: No server found for service {$team->sid} (TeamID {$team->teamid}), skipping");
-            continue;
-        }
 
         // Billing phase — guarded by CRON_OVERLAP_GUARD_MINUTES to prevent double-billing
         // when two cron processes overlap. API errors also skip the balance check since
         // we can't know the post-billing balance in that case.
         $skipBalanceCheck = false;
-        $shouldBill = true;
+        $shouldBill = ($teamHelper !== null);
 
-        if (!empty($team->last_billed_at)) {
+        if (!$teamHelper) {
+            logActivity("Hourly cron: no server for service {$team->sid} (TeamID {$team->teamid}) — skipping usage billing, still running balance check");
+        }
+
+        if ($shouldBill && !empty($team->last_billed_at)) {
             $secondsSince = time() - strtotime($team->last_billed_at);
             if ($secondsSince < CRON_OVERLAP_GUARD_MINUTES * 60) {
                 logActivity("Hourly cron: Skipping billing for TeamID {$team->teamid} — last billed {$secondsSince}s ago");
@@ -141,6 +143,23 @@ try {
                     ? floatval($product->configoption11)
                     : 1.00;
                 $currentReason = $team->suspended_reason ?? '';
+
+                // Auto top-up: proactively raise an Add Funds invoice when the wallet
+                // dips below the configured threshold (set above Min Wallet Balance so
+                // it fires before suspension). Dedup per client — skip if the client
+                // already has an open Add Funds invoice (credit is shared per client).
+                $topupThreshold = ($product && !empty($product->configoption14)) ? floatval($product->configoption14) : 0;
+                $topupAmount    = ($product && !empty($product->configoption15)) ? floatval($product->configoption15) : 0;
+                if ($topupThreshold > 0 && $topupAmount > 0 && $balance < $topupThreshold) {
+                    if (!$helper->hasOpenAddFundsInvoice($team->uid)) {
+                        $topup = $helper->createAddFundsInvoice($team->uid, $topupAmount);
+                        if (isset($topup['result']) && $topup['result'] === 'success') {
+                            logActivity("Hourly cron: auto top-up invoice #{$topup['invoiceid']} (\${$topupAmount}) raised for UID {$team->uid} — balance \${$balance} < threshold \${$topupThreshold}");
+                        }
+                    } else {
+                        logActivity("Hourly cron: auto top-up skipped for UID {$team->uid} — open Add Funds invoice already exists");
+                    }
+                }
 
                 if ($balance <= $minBalance && $currentReason !== 'balance_zero') {
                     $helper->suspendTerminate_service($team->sid, $team->pid, 'ModuleSuspend');

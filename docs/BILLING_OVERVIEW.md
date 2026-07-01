@@ -29,9 +29,17 @@ The mode per service is stored in `mod_hostdaiteam_details.billing_mode`
 an admin).
 
 > Note: each service is billed against **the hosted·ai server it lives on**. The
-> monthly cron binds an API client to the service's own server
-> (`hostedaiHelperForService`) so multi-cluster setups bill against the right
-> cluster instead of falling back to the first enabled server.
+> crons bind an API client to the service's own server (`hostedaiHelperForService`)
+> so multi-cluster setups bill against the right cluster instead of falling back to
+> the first enabled server. Balance checks / auto top-up / suspension still run when
+> a service's server is unavailable — only usage billing is skipped.
+
+**Wallet funding (prepaid).** The wallet is topped up via WHMCS **Add Funds**
+invoices (`Helper::createAddFundsInvoice` → item type `AddFunds`), so paying them
+credits the balance natively and revenue is counted once. Two optional, per-product
+mechanisms use it: **initial wallet credit** on provision (grant or invoice) and
+**auto top-up** when the balance drops below a threshold. See the
+[Administrator Guide → Wallet Funding](ADMINISTRATOR_GUIDE.md#wallet-funding).
 
 ---
 

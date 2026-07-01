@@ -393,6 +393,72 @@ class Helper
         }
     }
 
+    /**
+     * Create a WHMCS Add Funds invoice. When the client pays it, WHMCS natively
+     * adds the amount to their credit balance (the deposit is recorded once — no
+     * double-counting). There is no CreateInvoice flag for an Add Funds item type,
+     * so we create the invoice then flip its line item to type 'AddFunds'.
+     *
+     * @return array ['result' => 'success', 'invoiceid' => int] | error shape
+     */
+    public function createAddFundsInvoice($userId, $amount, $sendEmail = true)
+    {
+        try {
+            $amount = round(floatval($amount), 2);
+            if ($amount <= 0) {
+                return ['result' => 'error', 'message' => 'amount must be > 0'];
+            }
+
+            $invoice = localAPI('CreateInvoice', [
+                'userid'           => $userId,
+                'date'             => date('Y-m-d'),
+                'duedate'          => date('Y-m-d'),
+                'itemdescription1' => 'Add Funds',
+                'itemamount1'      => $amount,
+                'itemtaxed1'       => false,
+                'sendinvoice'      => $sendEmail ? true : false,
+            ]);
+
+            if (!isset($invoice['result']) || $invoice['result'] !== 'success') {
+                logActivity("createAddFundsInvoice: CreateInvoice failed for UID {$userId}: " . json_encode($invoice));
+                return ['result' => 'error', 'message' => 'CreateInvoice failed'];
+            }
+
+            $invoiceId = $invoice['invoiceid'];
+
+            // Flip the line item to an Add Funds deposit so WHMCS credits the
+            // client's wallet natively on payment (no custom AddCredit needed).
+            Capsule::table('tblinvoiceitems')
+                ->where('invoiceid', $invoiceId)
+                ->update(['type' => 'AddFunds', 'relid' => 0, 'description' => 'Add Funds']);
+
+            logActivity("createAddFundsInvoice: Add Funds invoice #{$invoiceId} for UID {$userId} amount \${$amount}");
+            return ['result' => 'success', 'invoiceid' => $invoiceId];
+        } catch (Exception $e) {
+            logActivity('createAddFundsInvoice error: ' . $e->getMessage());
+            return ['result' => 'error', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * True if the client already has an unpaid Add Funds invoice. Used to avoid
+     * stacking multiple auto top-up invoices (credit balance is per client).
+     */
+    public function hasOpenAddFundsInvoice($userId)
+    {
+        try {
+            return Capsule::table('tblinvoices')
+                ->join('tblinvoiceitems', 'tblinvoices.id', '=', 'tblinvoiceitems.invoiceid')
+                ->where('tblinvoices.userid', $userId)
+                ->where('tblinvoices.status', 'Unpaid')
+                ->where('tblinvoiceitems.type', 'AddFunds')
+                ->exists();
+        } catch (Exception $e) {
+            logActivity('hasOpenAddFundsInvoice error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     /* Get credit balance for a client */
     public function getClientCreditBalance($userId)
     {
