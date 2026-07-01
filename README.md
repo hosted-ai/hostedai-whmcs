@@ -5,7 +5,9 @@ Integrate your WHMCS Billing platform with hosted·ai
 > 📘 **Full reference:** see the [Administrator Guide](docs/ADMINISTRATOR_GUIDE.md)
 > for billing modes (monthly & prepaid wallet), cron jobs, low-balance alerts,
 > auto-suspend/unsuspend, the admin wallet tab, the database schema, and
-> troubleshooting.
+> troubleshooting. For how billing works end-to-end (invoices, gateways,
+> provisioning, dunning, DB schema), see the
+> [Billing Overview](docs/BILLING_OVERVIEW.md).
 
 ## Uploading Module Files
 
