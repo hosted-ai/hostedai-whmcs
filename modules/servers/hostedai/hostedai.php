@@ -779,8 +779,8 @@ function hostedai_AdminServicesTabFields(array $params)
                                             <h3>'.strtoupper($safeType).'</h3>
                                         </div>
                                         <div class="overview-card-detail">
-                                            <p>'.$used.'</p>
-                                            <p>'.$aval.'</p>
+                                            <p>'.htmlspecialchars($used, ENT_QUOTES, 'UTF-8').'</p>
+                                            <p>'.htmlspecialchars($aval, ENT_QUOTES, 'UTF-8').'</p>
                                         </div>
                                         <div class="progress">
                                             <div class="progress-bar" role="progressbar" aria-valuenow="'.$percentage.'" aria-valuemin="'.$percentage.'" aria-valuemax="'.$percentage.'" style="width:'.$percentage.'%">'.$percentage.'%</div>

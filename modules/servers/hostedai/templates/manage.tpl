@@ -11,12 +11,12 @@
                     <div class="col-lg-6 mt-2">
                         <div class="overview-card">
                             <div class="overview-card-header">
-                                <img src="{$assets}/images/{$key}.svg" alt="{$key}">
-                                <h3>{$key|upper|replace:'_':' '}</h3>
+                                <img src="{$assets}/images/{$key|escape:'url'}.svg" alt="{$key|escape}">
+                                <h3>{$key|upper|replace:'_':' '|escape}</h3>
                             </div>
                             <div class="overview-card-detail">
-                                <p>{$item->used} <b>{if $key == 'cores'} {$LANG['cores']} {elseif $key == 'gpus'} {$LANG['no_of_cards']} {else} {$LANG['storage_GB']} {/if}</b> {if $item->available == -1} {$LANG['infinity']} {else} ({$item->percent}%) {/if}</p>
-                                <p>{if $item->available == -1} {$LANG['unlimited']} {else} {$item->available}{if $key == 'cores'} {$LANG['cores']} {elseif $key == 'gpus'} {$LANG['no_of_cards']} {else} {$LANG['storage_GB']} {/if} {/if}</p>
+                                <p>{$item->used|escape} <b>{if $key == 'cores'} {$LANG['cores']} {elseif $key == 'gpus'} {$LANG['no_of_cards']} {else} {$LANG['storage_GB']} {/if}</b> {if $item->available == -1} {$LANG['infinity']} {else} ({$item->percent}%) {/if}</p>
+                                <p>{if $item->available == -1} {$LANG['unlimited']} {else} {$item->available|escape}{if $key == 'cores'} {$LANG['cores']} {elseif $key == 'gpus'} {$LANG['no_of_cards']} {else} {$LANG['storage_GB']} {/if} {/if}</p>
                             </div>
                             <div class="progress">
                                 <div class="progress-bar" role="progressbar" aria-valuenow="{$item->percent}" aria-valuemin="{$item->percent}" aria-valuemax="{$item->percent}" style="width:{$item->percent}%">{$item->percent}%</div>
@@ -77,9 +77,9 @@
 
                     {foreach from=$teammembers key=key item=member}
                         <tr>
-                            <td>{$member->user->email}</td>
-                            <td>{$member->role->label}</td>
-                            <td>{$member->status|ucfirst}</td>
+                            <td>{$member->user->email|escape}</td>
+                            <td>{$member->role->label|escape}</td>
+                            <td>{$member->status|ucfirst|escape}</td>
                         </tr>
                     {/foreach}
                    

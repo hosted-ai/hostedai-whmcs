@@ -120,6 +120,9 @@ try {
                         // Aggregate costs across all intervals (months)
                         $cpuTotal = 0; $ramTotal = 0; $diskTotal = 0; $gpuTotal = 0;
                         $subscriptionTotal = 0; $tflopsTotal = 0; $vramTotal = 0;
+                        // VM-nature instances expose "Disk Storage" / "Public IP Address"
+                        // instead of the pod resource keys above.
+                        $diskStorageTotal = 0; $publicIpTotal = 0;
 
                         if (isset($instanceData->intervals)) {
                             foreach ($instanceData->intervals as $month => $intervalData) {
@@ -131,7 +134,18 @@ try {
                                 $subscriptionTotal += floatval($res->{'Subscription Rate'}->cost ?? 0);
                                 $tflopsTotal += floatval($res->TFlops->cost ?? 0);
                                 $vramTotal += floatval($res->vRAM->cost ?? 0);
+                                $diskStorageTotal += floatval($res->{'Disk Storage'}->cost ?? 0);
+                                $publicIpTotal += floatval($res->{'Public IP Address'}->cost ?? 0);
                             }
+                        }
+
+                        // The API omits per-instance total_cost for VM-nature instances
+                        // (only pod/GPUaaS instances carry it). Without this fallback those
+                        // lines invoice at $0. Sum the itemized resource costs instead.
+                        if ($instanceTotalCost <= 0) {
+                            $instanceTotalCost = $cpuTotal + $ramTotal + $diskTotal + $gpuTotal
+                                + $subscriptionTotal + $tflopsTotal + $vramTotal
+                                + $diskStorageTotal + $publicIpTotal;
                         }
 
                         $cpu = number_format($cpuTotal, 2);
@@ -141,6 +155,8 @@ try {
                         $subscription = number_format($subscriptionTotal, 2);
                         $tflops = number_format($tflopsTotal, 2);
                         $vram = number_format($vramTotal, 2);
+                        $diskStorage = number_format($diskStorageTotal, 2);
+                        $publicIp = number_format($publicIpTotal, 2);
 
                         $description = <<<DESC
                                         Workspace: {$workspaceName}
@@ -152,6 +168,8 @@ try {
                                         Subscription Rate ……………………………… \$ {$subscription}
                                         TFlops ……………………………………………………… \$ {$tflops}
                                         vRAM ………………………………………………………… \$ {$vram}
+                                        Disk Storage …………………………………… \$ {$diskStorage}
+                                        Public IP ………………………………………… \$ {$publicIp}
                                         DESC;
 
                         $invoiceItems["itemdescription{$itemCount}"] = $description;
@@ -248,15 +266,24 @@ try {
                 logActivity("Shared storage billing for TeamID {$team->teamid}: " . json_encode($sharedStorageData));
                 
                 if (isset($sharedStorageData->details) && !empty($sharedStorageData->details)) {
-                    foreach ($sharedStorageData->details as $volumeName => $volumeData) {
-                        $volumeArray = (array)$volumeData;
-                        $interval = reset($volumeArray);
-                        
-                        $cost = number_format($interval->cost ?? 0, 2);
-                        $hoursDecimal = $interval->hours ?? 0;
-                        $hoursFormatted = $helper->formatHoursMinutes($hoursDecimal);
-                        
-                        if ($cost > 0) {
+                    foreach ($sharedStorageData->details as $storageId => $volumeData) {
+                        // cost/hours are NOT direct properties of details[*]; they live under
+                        // details[*].intervals[intervalKey]. The old flat reset() read the
+                        // "intervals" map itself and always saw cost=0 → shared storage was
+                        // never billed. Aggregate across intervals like the gpuaas-pool block.
+                        $volumeName = $volumeData->storage_name ?? $storageId;
+                        $intervals  = isset($volumeData->intervals) ? (array)$volumeData->intervals : [];
+
+                        $volCost = 0.0; $volHours = 0.0;
+                        foreach ($intervals as $intervalData) {
+                            $volCost  += floatval($intervalData->cost ?? 0);
+                            $volHours += floatval($intervalData->hours ?? 0);
+                        }
+
+                        $cost = number_format($volCost, 2);
+                        $hoursFormatted = $helper->formatHoursMinutes($volHours);
+
+                        if ($volCost > 0) {
                             $description = <<<DESC
                             Shared Storage: {$volumeName}
                             Hours ................................... {$hoursFormatted}
@@ -264,10 +291,10 @@ try {
                             DESC;
 
                             $invoiceItems["itemdescription{$itemCount}"] = $description;
-                            $invoiceItems["itemamount{$itemCount}"] = $interval->cost; // Use raw float for invoice
+                            $invoiceItems["itemamount{$itemCount}"] = $volCost; // raw float for invoice
                             $invoiceItems["itemtaxed{$itemCount}"] = true;
 
-                            $totalWithoutTax += $interval->cost;
+                            $totalWithoutTax += $volCost;
                             $itemCount++;
                         }
                     }
@@ -289,8 +316,9 @@ try {
                         
                         $gpuCost = number_format($interval->GPU->cost ?? 0, 2);
                         $vramCost = number_format($interval->vRAM->cost ?? 0, 2);
-                        $subscriptionCost = number_format($interval->SubscriptionRate->cost ?? 0, 2);
-                        $ephemeralStorageCost = number_format($interval->EphimeralStorage->cost ?? 0, 2);
+                        // JSON keys carry spaces: "Subscription Rate" / "Ephemeral Storage".
+                        $subscriptionCost = number_format($interval->{'Subscription Rate'}->cost ?? 0, 2);
+                        $ephemeralStorageCost = number_format($interval->{'Ephemeral Storage'}->cost ?? 0, 2);
                         $cpuCost = number_format($interval->CPU->cost ?? 0, 2);
                         $ramCost = number_format($interval->RAM->cost ?? 0, 2);
                         $intervalHoursDecimal = $interval->interval_hours ?? 0;
@@ -393,13 +421,20 @@ try {
             $suspend_days = $product->configoption8;
             $terminate_days = $product->configoption9;
     
-            if ($suspend_days !== null && $terminate_days !== null) {
+            // Both day-counts must be real numbers. A blank configoption is stored as
+            // '' (not null), which passed the old `!== null` guard; then `$daysDiff > ''`
+            // is true for any positive diff under PHP 8 (number cast to string, "40" > ""),
+            // so a product with a blank "Termination Days" would TERMINATE (delete) every
+            // overdue team. Require numeric and cast to int; blank => skip this service.
+            if (is_numeric($suspend_days) && is_numeric($terminate_days)) {
+                $suspend_days   = (int) $suspend_days;
+                $terminate_days = (int) $terminate_days;
                 $invoiceDate = new DateTime($invoice_date);
                 $today = new DateTime();
                 $daysDiff = $invoiceDate->diff($today)->days;
-    
+
                 logActivity("Checking service ID {$invoice->sid} - Days since invoice: {$daysDiff}");
-    
+
                 if ($daysDiff > $terminate_days) {
                     $helper->suspendTerminate_service($invoice->sid , $invoice->pid , 'ModuleTerminate');
                     logActivity("Service ID {$invoice->sid} TERMINATED - Days since invoice: {$daysDiff} (Limit: {$terminate_days})");
