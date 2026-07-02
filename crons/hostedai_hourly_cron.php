@@ -118,7 +118,10 @@ try {
 
                 if ($totalCost > 0) {
                     logActivity("Hourly cron: TeamID {$team->teamid} — deducting \${$totalCost}");
-                    $description  = "Hourly usage — " . date('Y-m-d H:00') . " — Team " . $team->teamid;
+                    // WHMCS invoices follow the client's currency; warn if the API bills
+                    // in a different one (the amount would be recorded mis-denominated).
+                    $helper->warnOnCurrencyMismatch($team->uid, $responseData->currency_code ?? null);
+                    $description  = "Hourly usage — " . gmdate('Y-m-d H:00') . " UTC — Team " . $team->teamid;
                     $deductResult = $helper->createAndPayHourlyInvoice($team->uid, $totalCost, $description);
 
                     if ($deductResult['result'] !== 'success') {

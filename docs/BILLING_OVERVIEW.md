@@ -56,6 +56,15 @@ mechanisms use it: **initial wallet credit** on provision (grant or invoice) and
   the wallet. The wallet is funded via **Add Funds** (its payment goes into
   credit). Hourly usage invoices are settled **from credit** (`ApplyCredit`), not
   through a gateway.
+- **Currency (important):** WHMCS has **no per-invoice currency** — `tblinvoices`
+  stores no currency column, so every invoice is denominated in the **client's
+  currency** (`tblclients.currency`). The hosted·ai API returns costs in the
+  **pricing policy's** currency. The module bills the API's numeric amount as-is, so
+  **the client's WHMCS currency must match the pricing-policy currency** — otherwise
+  the amount is recorded in the wrong currency (e.g. a £-priced policy booked as $).
+  Passing a `currency` parameter to `CreateInvoice` does not change this. Both crons
+  log a warning (`currency mismatch for UID …`) when they detect a mismatch; align
+  the client's currency with the policy to resolve it.
 
 ---
 

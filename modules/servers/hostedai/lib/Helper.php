@@ -202,14 +202,34 @@ class Helper
         }
     }
 
+    /**
+     * Default billing window for the previous calendar month, expressed in UTC to
+     * match the `timezone=UTC` query parameter every billing endpoint is called with.
+     * Building it from the server-local clock (date()/strtotime) shifted the window by
+     * the server's UTC offset, mis-billing at hour/month boundaries when the WHMCS
+     * server is not on UTC. Computed with gmmktime/gmdate so it is timezone-safe.
+     *
+     * @return array [start 'Y-m-01\TH:i', end 'Y-m-t\TH:i']
+     */
+    private function lastMonthWindowUtc()
+    {
+        $y = (int) gmdate('Y');
+        $m = (int) gmdate('n') - 1;
+        if ($m < 1) { $m = 12; $y -= 1; }
+        $firstOfLastMonth = gmmktime(0, 0, 0, $m, 1, $y);
+        return [
+            gmdate('Y-m-01\T00:00', $firstOfLastMonth),
+            gmdate('Y-m-t\T23:59', $firstOfLastMonth),
+        ];
+    }
+
     /* Generate Bill */
     public function generateBill($teamid)
     {
         try {
 
-            // Production: Bill for last month
-            $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
-            $end_date = date('Y-m-t\T23:59', strtotime('last month'));
+            // Production: Bill for last month (UTC window — see lastMonthWindowUtc)
+            [$start_date, $end_date] = $this->lastMonthWindowUtc();
 
             $endPoint = "team-billing/group-by-workspace/" . $teamid . "/" . $start_date . "/" . $end_date . "/monthly?timezone=UTC";
             
@@ -230,11 +250,10 @@ class Helper
     public function generateDetailedTeamBill($teamid, $start_date = null, $end_date = null, $interval = 'monthly')
     {
         try {
-            if (!$start_date) {
-                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
-            }
-            if (!$end_date) {
-                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
+            if (!$start_date || !$end_date) {
+                [$defaultStart, $defaultEnd] = $this->lastMonthWindowUtc();
+                if (!$start_date) { $start_date = $defaultStart; }
+                if (!$end_date)   { $end_date   = $defaultEnd; }
             }
 
             $endPoint = "team-billing/" . $teamid . "/" . $start_date . "/" . $end_date . "/" . $interval . "?timezone=UTC";
@@ -252,11 +271,10 @@ class Helper
     public function getWorkspaceBilling($workspaceId, $start_date = null, $end_date = null, $interval = 'monthly')
     {
         try {
-            if (!$start_date) {
-                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
-            }
-            if (!$end_date) {
-                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
+            if (!$start_date || !$end_date) {
+                [$defaultStart, $defaultEnd] = $this->lastMonthWindowUtc();
+                if (!$start_date) { $start_date = $defaultStart; }
+                if (!$end_date)   { $end_date   = $defaultEnd; }
             }
 
             $endPoint = "workspace-billing/" . $workspaceId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?timezone=UTC";
@@ -274,11 +292,10 @@ class Helper
     public function getTeamSharedStorageBilling($teamId, $regionId = 'all', $start_date = null, $end_date = null, $interval = 'monthly')
     {
         try {
-            if (!$start_date) {
-                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
-            }
-            if (!$end_date) {
-                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
+            if (!$start_date || !$end_date) {
+                [$defaultStart, $defaultEnd] = $this->lastMonthWindowUtc();
+                if (!$start_date) { $start_date = $defaultStart; }
+                if (!$end_date)   { $end_date   = $defaultEnd; }
             }
 
             $endPoint = "team-billing/shared-storage/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?region_id=" . urlencode($regionId) . "&timezone=UTC";
@@ -296,11 +313,10 @@ class Helper
     public function getTeamGpuaasPoolBilling($teamId, $regionId = 'all', $start_date = null, $end_date = null, $interval = 'monthly')
     {
         try {
-            if (!$start_date) {
-                $start_date = date('Y-m-01\T00:00', strtotime('first day of last month'));
-            }
-            if (!$end_date) {
-                $end_date = date('Y-m-t\T23:59', strtotime('last month'));
+            if (!$start_date || !$end_date) {
+                [$defaultStart, $defaultEnd] = $this->lastMonthWindowUtc();
+                if (!$start_date) { $start_date = $defaultStart; }
+                if (!$end_date)   { $end_date   = $defaultEnd; }
             }
 
             $endPoint = "team-billing/gpuaas-pool/" . $teamId . "/" . $start_date . "/" . $end_date . "/" . $interval . "?region_id=" . urlencode($regionId) . "&timezone=UTC";
@@ -354,8 +370,9 @@ class Helper
     public function generateHourlyBill($teamid)
     {
         try {
-            $end_date   = date('Y-m-d\TH:i');
-            $start_date = date('Y-m-d\TH:i', strtotime('-1 hour'));
+            // UTC window to match ?timezone=UTC (see lastMonthWindowUtc rationale).
+            $end_date   = gmdate('Y-m-d\TH:i');
+            $start_date = gmdate('Y-m-d\TH:i', time() - 3600);
             $endPoint   = "team-billing/group-by-workspace/{$teamid}/{$start_date}/{$end_date}/hourly?timezone=UTC";
             return $this->curlCall("GET", "generateHourlyBill", $endPoint, '');
         } catch (Exception $e) {
@@ -368,6 +385,11 @@ class Helper
     public function createAndPayHourlyInvoice($userId, $amount, $description)
     {
         try {
+            // Note: WHMCS invoices carry no currency of their own (tblinvoices has no
+            // currency column) — they are always denominated in the client's currency.
+            // Passing a `currency` param here has no effect. Currency correctness is
+            // enforced by aligning the client's WHMCS currency with the pricing policy;
+            // warnOnCurrencyMismatch() surfaces a mismatch. See docs/BILLING_OVERVIEW.md.
             $invoice = localAPI('CreateInvoice', [
                 'userid'           => $userId,
                 'date'             => date('Y-m-d'),
@@ -471,6 +493,42 @@ class Helper
         } catch (Exception $e) {
             logActivity('getClientCreditBalance error: ' . $e->getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Warn when the currency the hosted·ai API bills in differs from the client's
+     * WHMCS currency. WHMCS has no per-invoice currency (tblinvoices has no currency
+     * column) — every invoice is denominated in the client's currency — so a mismatch
+     * means the API's numeric amount is silently recorded in the wrong currency. The
+     * operator must align the client's WHMCS currency with the pricing policy.
+     *
+     * @return bool true when a mismatch was detected and logged.
+     */
+    public function warnOnCurrencyMismatch($userId, $apiCurrencyCode)
+    {
+        try {
+            if (empty($apiCurrencyCode)) {
+                return false;
+            }
+            $clientCurrency = Capsule::table('tblclients')
+                ->join('tblcurrencies', 'tblclients.currency', '=', 'tblcurrencies.id')
+                ->where('tblclients.id', $userId)
+                ->value('tblcurrencies.code');
+
+            if ($clientCurrency && strtoupper($clientCurrency) !== strtoupper($apiCurrencyCode)) {
+                logActivity(
+                    "hostedai: currency mismatch for UID {$userId} — pricing policy bills in "
+                    . "{$apiCurrencyCode} but the client's WHMCS currency is {$clientCurrency}. "
+                    . "WHMCS records the amount in {$clientCurrency}; align the client's currency "
+                    . "with the policy to avoid mis-denominated charges."
+                );
+                return true;
+            }
+            return false;
+        } catch (\Exception $e) {
+            logActivity('warnOnCurrencyMismatch error: ' . $e->getMessage());
+            return false;
         }
     }
 
