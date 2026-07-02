@@ -3,6 +3,13 @@
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\HosteDai\Helper;
 
+// CLI-only. This script runs prepaid billing and suspension — it must never be
+// triggerable over HTTP. Reject any non-CLI (web) invocation before bootstrapping.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 $whmcspath = "";
 if (file_exists(dirname(__FILE__) . "/config.php"))
     require_once dirname(__FILE__) . "/config.php";
@@ -39,10 +46,23 @@ function hostedaiHelperForService($sid)
 
 // Process lock — prevents two cron instances from running concurrently and
 // double-billing the same hour when the scheduler fires twice in quick succession.
-$lockFile = sys_get_temp_dir() . '/hostedai_hourly_cron.lock';
+// The lock lives in a private, per-install directory (0700) rather than a predictable
+// world-writable /tmp path, so another local user cannot pre-create/squat the file and
+// silently stall billing. A failure to OPEN the lock is treated as an error (loud,
+// non-zero exit) — only a genuinely held lock is a quiet "already running" exit.
+$lockDir = sys_get_temp_dir() . '/hostedai-' . substr(md5(__DIR__), 0, 12);
+if (!is_dir($lockDir)) {
+    @mkdir($lockDir, 0700, true);
+}
+$lockFile = $lockDir . '/hourly_cron.lock';
 $lockFd   = fopen($lockFile, 'c');
-if (!$lockFd || !flock($lockFd, LOCK_EX | LOCK_NB)) {
-    logActivity('HostedAI Hourly Cron: already running, exiting.');
+if (!$lockFd) {
+    logActivity('HostedAI Hourly Cron: ERROR — cannot open lock file ' . $lockFile . '; aborting to avoid unguarded billing.');
+    exit(1);
+}
+if (!flock($lockFd, LOCK_EX | LOCK_NB)) {
+    logActivity('HostedAI Hourly Cron: another instance is running, exiting.');
+    fclose($lockFd);
     exit(0);
 }
 
@@ -77,6 +97,15 @@ try {
 
         if (!$teamHelper) {
             logActivity("Hourly cron: no server for service {$team->sid} (TeamID {$team->teamid}) — skipping usage billing, still running balance check");
+        }
+
+        // Don't accrue new usage invoices on a service already suspended for zero
+        // balance: it isn't running, and invoices it can't pay would linger as overdue
+        // debt in a mode that is "no debt by design". The balance check below still runs
+        // (top-up + the InvoicePaid hook handle reactivation).
+        if (($team->suspended_reason ?? '') === 'balance_zero') {
+            $shouldBill = false;
+            logActivity("Hourly cron: TeamID {$team->teamid} suspended (balance_zero) — skipping usage billing");
         }
 
         if ($shouldBill && !empty($team->last_billed_at)) {

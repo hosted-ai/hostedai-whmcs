@@ -3,6 +3,13 @@
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\HosteDai\Helper;
 
+// CLI-only. This script runs billing and suspend/terminate — it must never be
+// triggerable over HTTP. Reject any non-CLI (web) invocation before bootstrapping.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 $whmcspath = "";
 if (file_exists(dirname(__FILE__) . "/config.php"))
     require_once dirname(__FILE__) . "/config.php";

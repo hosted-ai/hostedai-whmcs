@@ -584,11 +584,22 @@ function hostedai_ChangePackage(array $params)
 {
     try {
         $helper = new Helper($params);
-        $pricing_policy_id = $params['configoption1'];
-        $resource_policy_id = $params['configoption2'];
+        $pricing_policy_id       = $params['configoption1'];
+        $resource_policy_id      = $params['configoption2'];
+        $service_policy_id       = $params['configoption3'] ?? null;
+        $instance_type_policy_id = $params['configoption4'] ?? null;
+        $image_policy_id         = $params['configoption5'] ?? null;
         $teamId = $params['customfields']['team_id'];
 
-        $changePackage = $helper->changeHostedaiTeamPackage($pricing_policy_id, $resource_policy_id, $teamId); 
+        // Propagate all five policies on upgrade/downgrade (not just pricing + resource).
+        $changePackage = $helper->changeHostedaiTeamPackage(
+            $pricing_policy_id,
+            $resource_policy_id,
+            $teamId,
+            $service_policy_id,
+            $instance_type_policy_id,
+            $image_policy_id
+        );
         if($changePackage['status'] == 'success') {
             return 'success';
         } else {

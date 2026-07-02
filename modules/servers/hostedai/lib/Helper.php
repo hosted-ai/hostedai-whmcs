@@ -616,35 +616,93 @@ class Helper
         if ($code == 200 || $code == 201) {
             return true;
         }
-        $message = '';
-        if (isset($response['result']) && is_object($response['result']) && isset($response['result']->message)) {
-            $message = strtolower($response['result']->message);
+        if ($code != 400) {
+            return false;
         }
-        return $code == 400
-            && (strpos($message, 'already linked') !== false || strpos($message, 'already assigned') !== false);
+        // "Already assigned/linked" is a no-op success, not a failure. The resource
+        // endpoint reports it in the top-level message ("already linked to this resource
+        // policy"); the generic policy/{type}/assign-team endpoint reports it nested in
+        // errors[] ("policy already assigned to team" / "Team already assigned to policy").
+        $result = $response['result'] ?? null;
+        $texts  = [];
+        if (is_object($result)) {
+            if (isset($result->message)) {
+                $texts[] = $result->message;
+            }
+            if (isset($result->errors) && is_array($result->errors)) {
+                foreach ($result->errors as $err) {
+                    if (isset($err->message)) { $texts[] = $err->message; }
+                    if (isset($err->detail))  { $texts[] = $err->detail; }
+                }
+            }
+        }
+        $blob = strtolower(implode(' | ', $texts));
+        return strpos($blob, 'already linked') !== false || strpos($blob, 'already assigned') !== false;
+    }
+
+    /** True if $id looks like a policy UUID (skips '', '0', 'Select Option', labels). */
+    private function isPolicyId($id)
+    {
+        return is_string($id)
+            && preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $id) === 1;
+    }
+
+    /* Assign a general policy (service / instance-type / image) to a team. */
+    public function assignPolicyToTeam($policyType, $policyId, $teamId)
+    {
+        try {
+            $endPoint = 'policy/' . $policyType . '/assign-team';
+            $data = ['team_id' => $teamId, 'policy_id' => $policyId];
+            return $this->curlCall('POST', 'assignPolicyToTeam', $endPoint, $data);
+        } catch (Exception $e) {
+            logActivity('Failed to assign ' . $policyType . ' policy to team, Error: ' . $e->getMessage());
+            return ['httpcode' => 500, 'result' => null];
+        }
     }
 
     /** Change package based on teamID */
-    public function changeHostedaiTeamPackage($pricing_id, $resource_id, $teamId)
+    public function changeHostedaiTeamPackage($pricing_id, $resource_id, $teamId, $service_id = null, $instance_type_id = null, $image_id = null)
     {
         try {
 
-            $updatePricingPolicy = $this->updatePricing($pricing_id, $teamId);
-            $updateResourcePolicy = $this->updateResource($resource_id, $teamId);
+            // Propagate all configured policies so an upgrade to a product with different
+            // policies actually applies them (previously only pricing + resource were sent,
+            // so image/instance-type/service changes were silently dropped). Each general
+            // policy is only sent when a valid policy id is configured for the product.
+            $results = [
+                'pricing'  => $this->updatePricing($pricing_id, $teamId),
+                'resource' => $this->updateResource($resource_id, $teamId),
+            ];
+            $generalPolicies = [
+                'service'       => $service_id,
+                'instance-type' => $instance_type_id,
+                'image'         => $image_id,
+            ];
+            foreach ($generalPolicies as $policyType => $policyId) {
+                if ($this->isPolicyId($policyId)) {
+                    $results[$policyType] = $this->assignPolicyToTeam($policyType, $policyId, $teamId);
+                }
+            }
 
-            if ($this->policyAssignSucceeded($updatePricingPolicy) && $this->policyAssignSucceeded($updateResourcePolicy)) {
+            $failures = [];
+            foreach ($results as $label => $resp) {
+                if (!$this->policyAssignSucceeded($resp)) {
+                    $msg = $resp['result']->message ?? ('HTTP ' . ($resp['httpcode'] ?? '?'));
+                    $failures[] = "{$label}: {$msg}";
+                }
+            }
+
+            if (empty($failures)) {
                 return [
                     'status' => 'success',
                     'message' => 'Team package updated successfully.',
                 ];
             }
 
-            // Surface the real reason instead of a generic message.
-            $pMsg = $updatePricingPolicy['result']->message ?? ('HTTP ' . ($updatePricingPolicy['httpcode'] ?? '?'));
-            $rMsg = $updateResourcePolicy['result']->message ?? ('HTTP ' . ($updateResourcePolicy['httpcode'] ?? '?'));
+            // Surface the real reason(s) instead of a generic message.
             return [
                 'status'  => 'error',
-                'message' => "Failed to change team package (pricing: {$pMsg}; resource: {$rMsg}).",
+                'message' => 'Failed to change team package (' . implode('; ', $failures) . ').',
             ];
 
         } catch (Exception $e) {
