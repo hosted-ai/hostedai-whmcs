@@ -6,6 +6,26 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- Crons are now CLI-only: `hostedai_cron.php` and `hostedai_hourly_cron.php` reject any non-CLI (HTTP) invocation with 403 before bootstrapping. Previously they were executable over an unauthenticated HTTP GET, allowing anyone to trigger billing/suspension.
+- Escaped API-sourced values in the client area (`manage.tpl`: team member email/role/status, resource-type keys/values) and the admin service tab (`$used`/`$aval`) to prevent stored XSS from hosted·ai team data.
+- Hardened the hourly cron lock: it now lives in a private per-install `0700` directory instead of a predictable world-writable `/tmp` path (which a local user could squat to silently stall billing), and a lock-open failure now exits with an error instead of masquerading as "already running".
+
+### Fixed
+- Overdue automation no longer terminates (deletes) a team when "No. of Termination Days" is blank. Day-counts are now validated as numbers; a blank value skips the service instead of coercing to an always-true comparison.
+- Overdue termination now only applies to a service that is already suspended — an Active overdue service is suspended first, then terminated on a later run (never destroyed in one step).
+- Added an idempotency guard to the monthly cron: a service already invoiced in the current month is skipped, preventing duplicate invoices on a re-run.
+- Monthly invoices no longer bill VM (non-pod) instances at $0 — when the API omits per-instance `total_cost`, the cost is summed from the interval resources (incl. Disk Storage / Public IP).
+- Shared-storage costs are now invoiced: the cron descends into the `intervals` structure to read cost/hours (previously read at the wrong level, so shared storage was never billed).
+- Product upgrade/downgrade (ChangePackage) no longer reports a false error when a policy is unchanged (the resource endpoint returns 400 "already linked" for a no-op), and now surfaces the real API message on genuine failure.
+- ChangePackage now propagates all five policies (pricing, resource, service, instance-type, image) instead of only pricing + resource, so an upgrade to a product with different policies actually applies them.
+- Prepaid: a service already suspended for zero balance is no longer billed each hour (avoids lingering unpayable invoices); the balance check still runs.
+- GPUaaS-pool invoice description reads the correctly-spaced `"Subscription Rate"` / `"Ephemeral Storage"` keys (were showing $0.00; the billed total was already correct).
+- Billing windows are built in UTC (`gmdate`/`gmmktime`) to match the `timezone=UTC` API parameter, fixing over/under-billing when the WHMCS server is not on UTC.
+
+### Added
+- Currency-mismatch warning: both crons log a warning when the hosted·ai API bills in a different currency than the client's WHMCS currency (WHMCS has no per-invoice currency, so amounts follow the client — the client's currency must match the pricing policy).
+
 ## [2.4.0] - 2026-06-16
 
 ### Changed
