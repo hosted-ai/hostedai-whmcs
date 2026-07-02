@@ -602,25 +602,50 @@ class Helper
         }
     }
 
+    /**
+     * True if a policy assign-team call reached the desired state. The pricing endpoint
+     * returns 200 when the team is already assigned, but the resource endpoint returns
+     * 400 "already linked to this resource policy" for the same no-op. Both mean the
+     * team already has that policy — a success, not a failure. Without this, a package
+     * change that leaves the resource policy unchanged (e.g. a pricing-only upgrade, or
+     * a re-run) would wrongly report an error.
+     */
+    private function policyAssignSucceeded($response)
+    {
+        $code = $response['httpcode'] ?? 0;
+        if ($code == 200 || $code == 201) {
+            return true;
+        }
+        $message = '';
+        if (isset($response['result']) && is_object($response['result']) && isset($response['result']->message)) {
+            $message = strtolower($response['result']->message);
+        }
+        return $code == 400
+            && (strpos($message, 'already linked') !== false || strpos($message, 'already assigned') !== false);
+    }
+
     /** Change package based on teamID */
     public function changeHostedaiTeamPackage($pricing_id, $resource_id, $teamId)
     {
         try {
 
-            $updatePricingPolicy = $this->updatePricing($pricing_id, $teamId); 
+            $updatePricingPolicy = $this->updatePricing($pricing_id, $teamId);
             $updateResourcePolicy = $this->updateResource($resource_id, $teamId);
 
-            if($updatePricingPolicy['httpcode'] == 200 && $updateResourcePolicy['httpcode'] == 200) {
+            if ($this->policyAssignSucceeded($updatePricingPolicy) && $this->policyAssignSucceeded($updateResourcePolicy)) {
                 return [
                     'status' => 'success',
                     'message' => 'Team package updated successfully.',
                 ];
-            } else {
-                return [
-                    'status' => 'error',
-                    'message' => 'Error to change the team package.',
-                ];
             }
+
+            // Surface the real reason instead of a generic message.
+            $pMsg = $updatePricingPolicy['result']->message ?? ('HTTP ' . ($updatePricingPolicy['httpcode'] ?? '?'));
+            $rMsg = $updateResourcePolicy['result']->message ?? ('HTTP ' . ($updateResourcePolicy['httpcode'] ?? '?'));
+            return [
+                'status'  => 'error',
+                'message' => "Failed to change team package (pricing: {$pMsg}; resource: {$rMsg}).",
+            ];
 
         } catch (Exception $e) {
             logActivity('Failed to Change hostedai team package ID:' .$teamId.  ', Error: ', $e->getMessage());
