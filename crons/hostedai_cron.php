@@ -448,10 +448,18 @@ try {
 
                 logActivity("Checking service ID {$invoice->sid} - Days since invoice: {$daysDiff}");
 
-                if ($daysDiff > $terminate_days) {
+                // A service must be SUSPENDED before it can be terminated — never
+                // destroy a still-Active service in one step. An Active service past the
+                // suspend window is suspended (grace); only an already-Suspended service
+                // past the terminate window is terminated (on a later run). This keeps
+                // the dunning ladder intact regardless of how often the cron fires.
+                $svc         = Capsule::table('tblhosting')->where('id', $invoice->sid)->first();
+                $isSuspended = $svc && $svc->domainstatus === 'Suspended';
+
+                if ($daysDiff > $terminate_days && $isSuspended) {
                     $helper->suspendTerminate_service($invoice->sid , $invoice->pid , 'ModuleTerminate');
                     logActivity("Service ID {$invoice->sid} TERMINATED - Days since invoice: {$daysDiff} (Limit: {$terminate_days})");
-                } elseif ($daysDiff > $suspend_days) {
+                } elseif ($daysDiff > $suspend_days && !$isSuspended) {
                     $helper->suspendTerminate_service($invoice->sid, $invoice->pid, 'ModuleSuspend');
                     Capsule::table('mod_hostdaiteam_details')
                         ->where('sid', $invoice->sid)

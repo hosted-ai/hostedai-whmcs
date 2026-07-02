@@ -268,10 +268,10 @@ usage.
    one line item per cost category and emailed to the client.
 5. If total = 0 across all three sources, no invoice is created and the skip is logged.
 
-> **Warning — no deduplication guard.** The cron has no check for already-generated
-> invoices. Running it twice in the same month produces two invoices for the same
-> period. Schedule it strictly on the 1st and do not trigger it manually on
-> production without confirming it has not already run that month.
+> **Deduplication guard.** The cron skips any service whose stored invoice is already
+> dated in the current month, so a second run in the same month does not create a
+> duplicate invoice. (The guard keys on `mod_hostdaiteam_details.invoiceid`; a service
+> that has never been invoiced — `invoiceid` blank/`0` — is always billed.)
 
 > **Note — timing.** The cron targets the prior calendar month's data. Running it
 > before the 1st (e.g. on the 28th) invoices the month before that. Schedule
@@ -412,15 +412,24 @@ current mode.
 ### Monthly Cron — `crons/hostedai_cron.php`
 
 Processes all services where `billing_mode = 'monthly'` (or NULL). Generates one
-invoice per service with non-zero usage for the prior calendar month.
+invoice per service with non-zero usage for the prior calendar month, and runs the
+overdue suspend/terminate pass.
 
 ```cron
 0 0 1 * * /usr/bin/php /var/www/whmcs/crons/hostedai_cron.php
 ```
 
-Execution typically completes in under a minute for small installs. Do not run
-manually on production without confirming the cron has not already executed that
-month — there is no deduplication guard.
+> **Tip — daily schedule for prompt dunning.** The invoice-generation block only fires
+> on the 1st, but the overdue suspend/terminate pass runs on every invocation. On the
+> monthly schedule above, an account that goes overdue mid-month is not suspended until
+> the next 1st. To act on overdue accounts daily without creating extra invoices,
+> schedule it **daily** instead: `0 2 * * * …/hostedai_cron.php`.
+
+The cron now has a per-period idempotency guard: a service whose stored invoice is
+already dated in the current month is skipped, so a second run in the same month will
+not create a duplicate invoice. Overdue termination only applies to services that are
+already suspended — an Active overdue service is suspended first, then terminated on a
+later run.
 
 ### Hourly Cron — `crons/hostedai_hourly_cron.php`
 

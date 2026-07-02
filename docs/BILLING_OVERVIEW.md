@@ -81,8 +81,18 @@ created, the module rolls the team back so a retry starts clean.
 **Monthly mode**
 - Unpaid invoice → after `configoption8` (*suspension days*) the monthly cron
   **suspends** the service (and the hosted·ai team).
-- After `configoption9` (*termination days*) → **terminates**.
+- After `configoption9` (*termination days*) → **terminates** — but only a service
+  that is **already suspended** is terminated (an Active service past the terminate
+  window is suspended first; it can be terminated on a later run). A service is never
+  destroyed straight from Active.
 - Payment reminders (dunning) are stock WHMCS automated emails.
+
+> **Dunning cadence.** The overdue suspend/terminate pass lives in `hostedai_cron.php`.
+> Its promptness depends on how often you schedule that cron: if it runs only on the 1st
+> (`0 0 1 * *`), an account that goes overdue mid-month is not acted on until the next
+> run. To act on overdue accounts daily, schedule `hostedai_cron.php` **daily**
+> (`0 2 * * *`) — the monthly *invoice-generation* block still only fires on the 1st,
+> so a daily schedule just tightens dunning without creating extra invoices.
 
 **Prepaid mode** (no debt by design)
 - **Initial credit** (`configoption12/13`) — on provision the wallet is seeded so
@@ -105,6 +115,12 @@ created, the module rolls the team back so a retry starts clean.
 **Cancellation / termination**
 - **ModuleTerminate** deletes the hosted·ai team, clears the `team_id` custom
   field, and removes the `mod_hostdaiteam_details` row.
+- **No final partial-period invoice is raised on termination** (by design). Monthly
+  usage accrued since the last 1st-of-month invoice, and the final partial hour in
+  prepaid mode, are not billed at teardown. This is intentional: overdue terminations
+  are already unpaid (nothing to collect), and the prepaid final hour is negligible
+  (usage is billed hourly up to that point). If you need to bill a voluntary
+  mid-cycle cancellation, raise the final invoice manually before terminating.
 
 ---
 
