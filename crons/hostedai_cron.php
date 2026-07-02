@@ -61,6 +61,19 @@ try {
             // Production: Basic processing log (debug info removed for security)
             logActivity("Processing billing for TeamID {$team->teamid}");
 
+            // Idempotency guard — the cron bills last month and runs on the 1st, so an
+            // invoice already dated this month means this service was billed for the
+            // period in a prior run. Skip it to avoid a duplicate invoice if the cron
+            // fires twice (scheduler overlap, manual re-run, or web trigger). invoiceid
+            // "0"/"" is treated as "never billed" (empty() is true for both).
+            if (!empty($team->invoiceid)) {
+                $lastInvoice = Capsule::table('tblinvoices')->where('id', $team->invoiceid)->first();
+                if ($lastInvoice && strtotime($lastInvoice->date) >= strtotime(date('Y-m-01'))) {
+                    logActivity("Skipping TeamID {$team->teamid} — already invoiced this month (#{$team->invoiceid} dated {$lastInvoice->date})");
+                    continue;
+                }
+            }
+
             // Bind the API helper to the cluster this service actually lives on. Without
             // this, billing queries hit the wrong hosted·ai server and silently return zero.
             $teamHelper = hostedaiHelperForService($team->sid);
