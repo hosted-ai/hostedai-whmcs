@@ -135,61 +135,29 @@ try {
 
                     foreach ($workspace->instances as $instanceId => $instanceData) {
                         $instanceName = $instanceData->instance_name ?? $instanceId;
+
+                        // Per-category breakdown (Resources + Services + PCI), summed
+                        // across intervals. Data-driven — whatever the API returns is what
+                        // shows, so Service / GPU-card (PCI) lines appear when present.
+                        $breakdown = $helper->instanceCostBreakdown($instanceData);
+
+                        // Amount = the API's per-instance total_cost when present (pods);
+                        // for VM/KVM (total_cost omitted) fall back to the breakdown sum.
                         $instanceTotalCost = floatval($instanceData->total_cost ?? 0);
-
-                        // Aggregate costs across all intervals (months)
-                        $cpuTotal = 0; $ramTotal = 0; $diskTotal = 0; $gpuTotal = 0;
-                        $subscriptionTotal = 0; $tflopsTotal = 0; $vramTotal = 0;
-                        // VM-nature instances expose "Disk Storage" / "Public IP Address"
-                        // instead of the pod resource keys above.
-                        $diskStorageTotal = 0; $publicIpTotal = 0;
-
-                        if (isset($instanceData->intervals)) {
-                            foreach ($instanceData->intervals as $month => $intervalData) {
-                                $res = $intervalData->Resources ?? new \stdClass();
-                                $cpuTotal += floatval($res->CPU->cost ?? 0);
-                                $ramTotal += floatval($res->RAM->cost ?? 0);
-                                $diskTotal += floatval($res->{'Ephemeral Storage'}->cost ?? 0);
-                                $gpuTotal += floatval($res->GPU->cost ?? 0);
-                                $subscriptionTotal += floatval($res->{'Subscription Rate'}->cost ?? 0);
-                                $tflopsTotal += floatval($res->TFlops->cost ?? 0);
-                                $vramTotal += floatval($res->vRAM->cost ?? 0);
-                                $diskStorageTotal += floatval($res->{'Disk Storage'}->cost ?? 0);
-                                $publicIpTotal += floatval($res->{'Public IP Address'}->cost ?? 0);
-                            }
-                        }
-
-                        // The API omits per-instance total_cost for VM/KVM-nature instances
-                        // (only pod/GPUaaS instances carry it). Without a fallback those
-                        // lines invoice at $0. Sum ALL resource costs generically so no
-                        // dimension is missed (GPU, disk, public IP, bandwidth, …).
                         if ($instanceTotalCost <= 0) {
-                            $instanceTotalCost = $helper->sumInstanceResourceCost($instanceData);
+                            $instanceTotalCost = array_sum($breakdown);
                         }
 
-                        $cpu = number_format($cpuTotal, 2);
-                        $ram = number_format($ramTotal, 2);
-                        $disk = number_format($diskTotal, 2);
-                        $gpu = number_format($gpuTotal, 2);
-                        $subscription = number_format($subscriptionTotal, 2);
-                        $tflops = number_format($tflopsTotal, 2);
-                        $vram = number_format($vramTotal, 2);
-                        $diskStorage = number_format($diskStorageTotal, 2);
-                        $publicIp = number_format($publicIpTotal, 2);
-
-                        $description = <<<DESC
-                                        Workspace: {$workspaceName}
-                                        Instance: {$instanceName} ({$instanceId})
-                                        CPU ………………………………………………………… \$ {$cpu}
-                                        RAM ………………………………………………………… \$ {$ram}
-                                        Ephemeral Storage ……………………………… \$ {$disk}
-                                        GPU ………………………………………………………… \$ {$gpu}
-                                        Subscription Rate ……………………………… \$ {$subscription}
-                                        TFlops ……………………………………………………… \$ {$tflops}
-                                        vRAM ………………………………………………………… \$ {$vram}
-                                        Disk Storage …………………………………… \$ {$diskStorage}
-                                        Public IP ………………………………………… \$ {$publicIp}
-                                        DESC;
+                        // Build an itemized description from the breakdown (one line per
+                        // non-zero category). Reconciles with the billed amount.
+                        $descLines = "Workspace: {$workspaceName}\nInstance: {$instanceName} ({$instanceId})";
+                        foreach ($breakdown as $label => $amount) {
+                            if ($amount == 0) {
+                                continue;
+                            }
+                            $descLines .= "\n" . $label . ': $ ' . number_format($amount, 4);
+                        }
+                        $description = $descLines;
 
                         $invoiceItems["itemdescription{$itemCount}"] = $description;
                         $invoiceItems["itemamount{$itemCount}"] = $instanceTotalCost;

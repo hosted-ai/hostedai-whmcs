@@ -383,34 +383,44 @@ class Helper
     }
 
     /**
-     * Total cost of an instance = sum of every cost across its billing intervals, over
-     * all three cost buckets the API returns per interval:
-     *   - Resources (CPU, RAM, GPU, vRAM, TFlops, Ephemeral/Disk Storage, Public IP, …)
-     *   - Services  (service-policy charges)
-     *   - pci_dev   (PCI / GPU passthrough cards)
-     * matching how the backend composes per-instance `total_cost`. The roll-up
-     * "total_cost" key inside Resources is skipped so it is not double-counted.
+     * Per-instance cost breakdown, summed by resource label across all billing
+     * intervals, from the interval `Resources` bucket (CPU, RAM, GPU, vRAM, TFlops,
+     * Ephemeral/Disk Storage, Public IP, …). The roll-up "total_cost" key is skipped.
      *
-     * Used as the fallback when the API omits per-instance `total_cost` (VM/KVM-nature
-     * instances), so no dimension — including Service and GPU-card (PCI) costs — is
-     * dropped from the bill.
+     * IMPORTANT — verified against the live API: per-instance `total_cost` equals the
+     * sum of `Resources` ONLY. The separate `Services` (service-policy) and `pci_dev`
+     * buckets are NOT part of `total_cost` — they roll up into the team-level
+     * `total_billing`, not the instance figure. So this breakdown deliberately covers
+     * Resources only; its sum reconciles exactly with `instance.total_cost`. Billing
+     * Services/PCI is a separate, platform-clarified decision (would switch the amount
+     * source to `total_billing`), not something to fold in here — doing so would
+     * over-bill VM/KVM (whose amount falls back to this sum) relative to pods.
+     *
+     * @return array<string,float>
+     */
+    public function instanceCostBreakdown($instanceData)
+    {
+        $out = [];
+        foreach ((array) ($instanceData->intervals ?? []) as $interval) {
+            foreach ((array) ($interval->Resources ?? []) as $key => $entry) {
+                if ($key === 'total_cost' || !is_object($entry) || !isset($entry->cost)) {
+                    continue;
+                }
+                $out[$key] = ($out[$key] ?? 0) + floatval($entry->cost);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Total cost of an instance across its intervals = sum of the Resources breakdown,
+     * matching `instance.total_cost` (Resources-only). Used as the fallback when the API
+     * omits per-instance `total_cost` (VM/KVM-nature instances), so VM billing stays
+     * consistent with how pods are billed.
      */
     public function sumInstanceResourceCost($instanceData)
     {
-        $total = 0.0;
-        foreach ((array) ($instanceData->intervals ?? []) as $interval) {
-            foreach (['Resources', 'Services', 'pci_dev'] as $bucket) {
-                foreach ((array) ($interval->{$bucket} ?? []) as $key => $entry) {
-                    if ($key === 'total_cost') {
-                        continue;
-                    }
-                    if (is_object($entry) && isset($entry->cost)) {
-                        $total += floatval($entry->cost);
-                    }
-                }
-            }
-        }
-        return $total;
+        return array_sum($this->instanceCostBreakdown($instanceData));
     }
 
     /**

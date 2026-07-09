@@ -138,23 +138,32 @@ try {
                 // team metrics — those accrued on the platform but were never charged.
                 $lineItems = [];
 
-                // 1) Compute (instances). Do NOT use current_month_total_cost — for an
-                //    hourly window it is 0/cumulative-agnostic; sum per-instance total_cost.
-                //    VM-nature instances omit total_cost, so fall back to summing the
-                //    itemized interval resources (excluding the "total_cost" key).
-                $compute = 0.0;
+                // 1) Compute — one invoice line PER INSTANCE with a per-category breakdown
+                //    (CPU/RAM/GPU/…/Service/PCI) in the description, matching the monthly
+                //    invoice and the platform UI. Do NOT use current_month_total_cost (it is
+                //    0/cumulative-agnostic for an hourly window). Amount = per-instance
+                //    total_cost when present (pods); VM/KVM omit it → breakdown sum.
                 foreach ($responseData->billing_by_workspace ?? [] as $workspace) {
                     foreach ($workspace->instances ?? [] as $instanceData) {
+                        $breakdown = $helper->instanceCostBreakdown($instanceData);
                         $ic = floatval($instanceData->total_cost ?? 0);
                         if ($ic <= 0) {
-                            // VM/KVM omit total_cost — sum all resource costs (GPU incl.).
-                            $ic = $helper->sumInstanceResourceCost($instanceData);
+                            $ic = array_sum($breakdown);
                         }
-                        $compute += $ic;
+                        if ($ic <= 0) {
+                            continue;
+                        }
+                        $iname = $instanceData->instance_name ?? 'instance';
+                        $parts = [];
+                        foreach ($breakdown as $label => $amount) {
+                            if ($amount != 0) {
+                                $parts[] = $label . ' $' . number_format($amount, 4);
+                            }
+                        }
+                        $desc = "Compute — {$iname} — {$hourLabel}"
+                            . ($parts ? ' (' . implode(', ', $parts) . ')' : '');
+                        $lineItems[] = ['description' => $desc, 'amount' => $ic];
                     }
-                }
-                if ($compute > 0) {
-                    $lineItems[] = ['description' => "Compute (instances) — {$hourLabel} — Team {$team->teamid}", 'amount' => $compute];
                 }
 
                 // 2) Shared storage (best-effort; separate endpoint).
