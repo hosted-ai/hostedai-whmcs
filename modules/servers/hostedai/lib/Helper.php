@@ -383,18 +383,19 @@ class Helper
     }
 
     /**
-     * Per-instance cost breakdown, summed by resource label across all billing
-     * intervals, from the interval `Resources` bucket (CPU, RAM, GPU, vRAM, TFlops,
-     * Ephemeral/Disk Storage, Public IP, …). The roll-up "total_cost" key is skipped.
+     * Per-instance cost breakdown, summed by category label across all billing
+     * intervals, over the three buckets the API returns per interval:
+     *   - Resources (CPU, RAM, GPU, vRAM, TFlops, Ephemeral/Disk Storage, Public IP, …)
+     *   - Services  (service-policy fees) → grouped under a single "Service" label
+     *   - pci_dev   (PCI / GPU passthrough cards) → grouped under "PCI (GPU card)"
+     * The roll-up "total_cost" key inside Resources is skipped so it is not counted.
      *
-     * IMPORTANT — verified against the live API: per-instance `total_cost` equals the
-     * sum of `Resources` ONLY. The separate `Services` (service-policy) and `pci_dev`
-     * buckets are NOT part of `total_cost` — they roll up into the team-level
-     * `total_billing`, not the instance figure. So this breakdown deliberately covers
-     * Resources only; its sum reconciles exactly with `instance.total_cost`. Billing
-     * Services/PCI is a separate, platform-clarified decision (would switch the amount
-     * source to `total_billing`), not something to fold in here — doing so would
-     * over-bill VM/KVM (whose amount falls back to this sum) relative to pods.
+     * IMPORTANT — verified against the live API: the platform's authoritative per-instance
+     * charge (its `total_billing`, and the user-panel figure) = Resources + Services +
+     * pci_dev. The `instance.total_cost` field is **Resources-only** and understates the
+     * bill by the Service/PCI amount, so it must NOT be used as the amount — the crons
+     * bill the sum of this breakdown instead. Example (verified): Resources 18.30 +
+     * Services 8.13 = 26.43 = total_billing = panel.
      *
      * @return array<string,float>
      */
@@ -408,15 +409,25 @@ class Helper
                 }
                 $out[$key] = ($out[$key] ?? 0) + floatval($entry->cost);
             }
+            foreach ((array) ($interval->Services ?? []) as $entry) {
+                if (is_object($entry) && isset($entry->cost)) {
+                    $out['Service'] = ($out['Service'] ?? 0) + floatval($entry->cost);
+                }
+            }
+            foreach ((array) ($interval->pci_dev ?? []) as $entry) {
+                if (is_object($entry) && isset($entry->cost)) {
+                    $out['PCI (GPU card)'] = ($out['PCI (GPU card)'] ?? 0) + floatval($entry->cost);
+                }
+            }
         }
         return $out;
     }
 
     /**
-     * Total cost of an instance across its intervals = sum of the Resources breakdown,
-     * matching `instance.total_cost` (Resources-only). Used as the fallback when the API
-     * omits per-instance `total_cost` (VM/KVM-nature instances), so VM billing stays
-     * consistent with how pods are billed.
+     * Authoritative per-instance charge = sum of the breakdown (Resources + Services +
+     * pci_dev), which the live API confirms equals the platform's `total_billing` / panel
+     * figure. Used as the per-instance amount by both crons (do NOT use the API's
+     * `instance.total_cost`, which is Resources-only and understates the bill).
      */
     public function sumInstanceResourceCost($instanceData)
     {

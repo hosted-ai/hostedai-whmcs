@@ -141,12 +141,11 @@ try {
                         // shows, so Service / GPU-card (PCI) lines appear when present.
                         $breakdown = $helper->instanceCostBreakdown($instanceData);
 
-                        // Amount = the API's per-instance total_cost when present (pods);
-                        // for VM/KVM (total_cost omitted) fall back to the breakdown sum.
-                        $instanceTotalCost = floatval($instanceData->total_cost ?? 0);
-                        if ($instanceTotalCost <= 0) {
-                            $instanceTotalCost = array_sum($breakdown);
-                        }
+                        // Amount = full breakdown sum (Resources + Services + PCI), which
+                        // matches the platform's per-instance total_billing / UI figure.
+                        // Do NOT use instance.total_cost: it is Resources-only and omits the
+                        // Service/PCI fee (verified live: total_cost 18.30 vs full 26.43).
+                        $instanceTotalCost = array_sum($breakdown);
 
                         // Build an itemized description from the breakdown (one line per
                         // non-zero category). Reconciles with the billed amount.
