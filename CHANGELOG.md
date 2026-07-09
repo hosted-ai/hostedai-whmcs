@@ -28,6 +28,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Hardened the hourly cron lock: it now lives in a private per-install `0700` directory instead of a predictable world-writable `/tmp` path (which a local user could squat to silently stall billing), and a lock-open failure now exits with an error instead of masquerading as "already running".
 
 ### Fixed
+- Prepaid hourly billing now charges **shared storage, GPUaaS-pool and team-level (team_metrics) usage**, not just per-instance compute — previously those accrued on the platform but were never billed in prepaid mode. Compute for VM (non-pod) instances also falls back to summing interval resources when `total_cost` is omitted (same as the monthly fix). The hourly invoice is now **itemized** — a separate line per cost category (compute / shared storage / GPUaaS pool / team resource usage).
 - Overdue automation no longer terminates (deletes) a team when "No. of Termination Days" is blank. Day-counts are now validated as numbers; a blank value skips the service instead of coercing to an always-true comparison.
 - Overdue termination now only applies to a service that is already suspended — an Active overdue service is suspended first, then terminated on a later run (never destroyed in one step).
 - Added an idempotency guard to the monthly cron: a service already invoiced in the current month is skipped, preventing duplicate invoices on a re-run.

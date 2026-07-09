@@ -119,26 +119,89 @@ try {
         if ($shouldBill) {
             logActivity("Hourly cron: Processing billing for TeamID {$team->teamid} (UID {$team->uid})");
 
-            $response = $teamHelper->generateHourlyBill($team->teamid);
+            // One shared UTC window so every category query covers the identical hour.
+            $winEnd    = gmdate('Y-m-d\TH:i');
+            $winStart  = gmdate('Y-m-d\TH:i', time() - 3600);
+            $hourLabel = gmdate('Y-m-d H:00') . ' UTC';
+
+            $response = $teamHelper->generateHourlyBill($team->teamid, $winStart, $winEnd);
 
             if ($response['httpcode'] !== 200) {
                 logActivity("Hourly cron: API error for TeamID {$team->teamid}, HTTP {$response['httpcode']}");
                 $skipBalanceCheck = true;
             } else {
                 $responseData = $response['result'];
+                $currencyCode = $responseData->currency_code ?? null;
 
-                // Extract total hourly cost — prefer current_month_total_cost, fall back to
-                // summing workspace instance costs
-                $totalCost = 0.0;
-                if (isset($responseData->current_month_total_cost) && $responseData->current_month_total_cost > 0) {
-                    $totalCost = floatval($responseData->current_month_total_cost);
-                } elseif (isset($responseData->billing_by_workspace)) {
-                    foreach ($responseData->billing_by_workspace as $workspace) {
-                        foreach ($workspace->instances ?? [] as $instanceData) {
-                            $totalCost += floatval($instanceData->total_cost ?? 0);
+                // Build one invoice line per non-zero cost category. Prepaid used to bill
+                // ONLY compute (per-instance) and ignore shared storage / GPUaaS pool /
+                // team metrics — those accrued on the platform but were never charged.
+                $lineItems = [];
+
+                // 1) Compute (instances). Do NOT use current_month_total_cost — for an
+                //    hourly window it is 0/cumulative-agnostic; sum per-instance total_cost.
+                //    VM-nature instances omit total_cost, so fall back to summing the
+                //    itemized interval resources (excluding the "total_cost" key).
+                $compute = 0.0;
+                foreach ($responseData->billing_by_workspace ?? [] as $workspace) {
+                    foreach ($workspace->instances ?? [] as $instanceData) {
+                        $ic = floatval($instanceData->total_cost ?? 0);
+                        if ($ic <= 0 && isset($instanceData->intervals)) {
+                            foreach ($instanceData->intervals as $iv) {
+                                foreach ((array)($iv->Resources ?? []) as $rk => $ru) {
+                                    if ($rk === 'total_cost') { continue; }
+                                    $ic += floatval($ru->cost ?? 0);
+                                }
+                            }
                         }
+                        $compute += $ic;
                     }
                 }
+                if ($compute > 0) {
+                    $lineItems[] = ['description' => "Compute (instances) — {$hourLabel} — Team {$team->teamid}", 'amount' => $compute];
+                }
+
+                // 2) Shared storage (best-effort; separate endpoint).
+                $ss = $teamHelper->getTeamSharedStorageBilling($team->teamid, 'all', $winStart, $winEnd, 'hourly');
+                if (($ss['httpcode'] ?? 0) === 200) {
+                    $storage = 0.0;
+                    foreach ((array)($ss['result']->details ?? []) as $vol) {
+                        foreach ((array)($vol->intervals ?? []) as $iv) {
+                            $storage += floatval($iv->cost ?? 0);
+                        }
+                    }
+                    if ($storage > 0) {
+                        $lineItems[] = ['description' => "Shared storage — {$hourLabel} — Team {$team->teamid}", 'amount' => $storage];
+                    }
+                }
+
+                // 3) GPUaaS pool (best-effort).
+                $gp = $teamHelper->getTeamGpuaasPoolBilling($team->teamid, 'all', $winStart, $winEnd, 'hourly');
+                if (($gp['httpcode'] ?? 0) === 200) {
+                    $pool = 0.0;
+                    foreach ((array)($gp['result']->details ?? []) as $pd) {
+                        foreach ((array)($pd->intervals ?? []) as $iv) {
+                            $pool += floatval($iv->interval_cost ?? 0);
+                        }
+                    }
+                    if ($pool > 0) {
+                        $lineItems[] = ['description' => "GPUaaS pool — {$hourLabel} — Team {$team->teamid}", 'amount' => $pool];
+                    }
+                }
+
+                // 4) Team-level resource usage (team_metrics; detailed endpoint only).
+                $dt = $teamHelper->generateDetailedTeamBill($team->teamid, $winStart, $winEnd, 'hourly');
+                if (($dt['httpcode'] ?? 0) === 200 && !empty($dt['result']->team_metrics)) {
+                    $tmArr   = (array)$dt['result']->team_metrics;
+                    $tmFirst = reset($tmArr);
+                    $tmCost  = floatval($tmFirst->total_cost ?? 0);
+                    if ($tmCost > 0) {
+                        $lineItems[] = ['description' => "Team resource usage — {$hourLabel} — Team {$team->teamid}", 'amount' => $tmCost];
+                    }
+                }
+
+                $totalCost = 0.0;
+                foreach ($lineItems as $li) { $totalCost += $li['amount']; }
 
                 // Stamp last_billed_at (prevents redundant API calls for zero-usage teams)
                 Capsule::table('mod_hostdaiteam_details')
@@ -146,12 +209,13 @@ try {
                     ->update(['last_billed_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
 
                 if ($totalCost > 0) {
-                    logActivity("Hourly cron: TeamID {$team->teamid} — deducting \${$totalCost}");
+                    $cats = implode(', ', array_map(function ($li) { return $li['description']; }, $lineItems));
+                    logActivity("Hourly cron: TeamID {$team->teamid} — deducting \${$totalCost} across " . count($lineItems) . " line item(s)");
                     // WHMCS invoices follow the client's currency; warn if the API bills
                     // in a different one (the amount would be recorded mis-denominated).
-                    $helper->warnOnCurrencyMismatch($team->uid, $responseData->currency_code ?? null);
-                    $description  = "Hourly usage — " . gmdate('Y-m-d H:00') . " UTC — Team " . $team->teamid;
-                    $deductResult = $helper->createAndPayHourlyInvoice($team->uid, $totalCost, $description);
+                    $helper->warnOnCurrencyMismatch($team->uid, $currencyCode);
+                    $summary      = "Hourly usage — {$hourLabel} — Team {$team->teamid}";
+                    $deductResult = $helper->createAndPayHourlyInvoice($team->uid, $totalCost, $summary, $lineItems);
 
                     if ($deductResult['result'] !== 'success') {
                         logActivity("Hourly cron: Deduction failed for TeamID {$team->teamid}: " . json_encode($deductResult));

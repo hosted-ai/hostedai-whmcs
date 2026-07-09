@@ -366,13 +366,14 @@ class Helper
         }
     }
 
-    /* Generate bill for last 1 hour (prepaid mode) */
-    public function generateHourlyBill($teamid)
+    /* Generate bill for the last hour (prepaid mode). Dates optional — default to the
+       last hour in UTC (to match ?timezone=UTC); the cron passes an explicit window so
+       all category queries cover the identical hour. */
+    public function generateHourlyBill($teamid, $start_date = null, $end_date = null)
     {
         try {
-            // UTC window to match ?timezone=UTC (see lastMonthWindowUtc rationale).
-            $end_date   = gmdate('Y-m-d\TH:i');
-            $start_date = gmdate('Y-m-d\TH:i', time() - 3600);
+            $end_date   = $end_date ?: gmdate('Y-m-d\TH:i');
+            $start_date = $start_date ?: gmdate('Y-m-d\TH:i', time() - 3600);
             $endPoint   = "team-billing/group-by-workspace/{$teamid}/{$start_date}/{$end_date}/hourly?timezone=UTC";
             return $this->curlCall("GET", "generateHourlyBill", $endPoint, '');
         } catch (Exception $e) {
@@ -381,32 +382,49 @@ class Helper
         }
     }
 
-    /* Create an hourly deduction invoice and immediately pay it from the client's credit balance */
-    public function createAndPayHourlyInvoice($userId, $amount, $description)
+    /**
+     * Create a usage-deduction invoice and immediately pay it from the client's credit.
+     *
+     * $lineItems (optional): [['description' => string, 'amount' => float], ...] for an
+     * itemized invoice (e.g. a compute line + a shared-storage line). When omitted, a
+     * single line built from $amount/$description is used (back-compatible).
+     *
+     * Note: WHMCS invoices carry no currency of their own (tblinvoices has no currency
+     * column) — they are always denominated in the client's currency; a `currency` param
+     * would have no effect. warnOnCurrencyMismatch() surfaces a mismatch instead.
+     */
+    public function createAndPayHourlyInvoice($userId, $amount, $description, $lineItems = null)
     {
         try {
-            // Note: WHMCS invoices carry no currency of their own (tblinvoices has no
-            // currency column) — they are always denominated in the client's currency.
-            // Passing a `currency` param here has no effect. Currency correctness is
-            // enforced by aligning the client's WHMCS currency with the pricing policy;
-            // warnOnCurrencyMismatch() surfaces a mismatch. See docs/BILLING_OVERVIEW.md.
-            $invoice = localAPI('CreateInvoice', [
-                'userid'           => $userId,
-                'date'             => date('Y-m-d'),
-                'duedate'          => date('Y-m-d'),
-                'itemdescription1' => $description,
-                'itemamount1'      => $amount,
-                'itemtaxed1'       => false,
-            ]);
+            $items = (is_array($lineItems) && $lineItems)
+                ? $lineItems
+                : [['description' => $description, 'amount' => $amount]];
+
+            $params = [
+                'userid'  => $userId,
+                'date'    => date('Y-m-d'),
+                'duedate' => date('Y-m-d'),
+            ];
+            $total = 0.0;
+            $i = 1;
+            foreach ($items as $it) {
+                $params["itemdescription{$i}"] = $it['description'];
+                $params["itemamount{$i}"]      = $it['amount'];
+                $params["itemtaxed{$i}"]       = false;
+                $total += floatval($it['amount']);
+                $i++;
+            }
+
+            $invoice = localAPI('CreateInvoice', $params);
 
             if (!isset($invoice['result']) || $invoice['result'] !== 'success') {
                 logActivity("createAndPayHourlyInvoice: CreateInvoice failed for UID {$userId}: " . json_encode($invoice));
                 return ['result' => 'error', 'message' => 'CreateInvoice failed'];
             }
 
-            $invoiceId   = $invoice['invoiceid'];
-            $creditResult = localAPI('ApplyCredit', ['invoiceid' => $invoiceId, 'amount' => $amount]);
-            logActivity("Hourly deduction: UID={$userId} amount=\${$amount} invoice=#{$invoiceId} credit=" . json_encode($creditResult));
+            $invoiceId    = $invoice['invoiceid'];
+            $creditResult = localAPI('ApplyCredit', ['invoiceid' => $invoiceId, 'amount' => $total]);
+            logActivity("Hourly deduction: UID={$userId} amount=\${$total} invoice=#{$invoiceId} items=" . count($items) . " credit=" . json_encode($creditResult));
 
             return ['result' => 'success', 'invoiceid' => $invoiceId, 'credit_result' => $creditResult];
         } catch (Exception $e) {

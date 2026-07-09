@@ -22,7 +22,7 @@ the due date (Setup → Automation Settings → Invoice Generation). One-off cha
 | Mode | Cron | Timing | Behaviour |
 |---|---|---|---|
 | **monthly** | `crons/hostedai_cron.php` | 1st of each month | Pulls **last month's** usage from the hosted·ai API and builds **one detailed invoice** per team — line items for each instance (CPU/RAM/GPU/Ephemeral/Subscription/TFlops/vRAM) plus shared-storage, GPUaaS-pool, PCI and team-metrics costs. |
-| **prepaid** | `crons/hostedai_hourly_cron.php` | every hour | Pulls the **last hour's** usage; if > 0, creates an invoice and **immediately pays it from the client's wallet** (`ApplyCredit`). Micro-invoices, auto-paid. |
+| **prepaid** | `crons/hostedai_hourly_cron.php` | every hour | Pulls the **last hour's** usage across all categories — **compute (instances), shared storage, GPUaaS pool and team-level usage** — and creates an **itemized** invoice (a line per category), then **immediately pays it from the client's wallet** (`ApplyCredit`). Micro-invoices, auto-paid. |
 
 The mode per service is stored in `mod_hostdaiteam_details.billing_mode`
 (seeded from the product's `configoption10` at provisioning, switchable later by
