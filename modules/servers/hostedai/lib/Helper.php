@@ -383,6 +383,28 @@ class Helper
     }
 
     /**
+     * Total cost of an instance = sum of every resource cost across its billing
+     * intervals, EXCLUDING the roll-up "total_cost" key. Used as the fallback when the
+     * API omits per-instance `total_cost` (VM/KVM-nature instances), so no cost dimension
+     * (CPU, RAM, GPU, disk, public IP, bandwidth, …) is ever dropped from the bill.
+     */
+    public function sumInstanceResourceCost($instanceData)
+    {
+        $total = 0.0;
+        foreach ((array) ($instanceData->intervals ?? []) as $interval) {
+            foreach ((array) ($interval->Resources ?? []) as $key => $usage) {
+                if ($key === 'total_cost') {
+                    continue;
+                }
+                if (is_object($usage) && isset($usage->cost)) {
+                    $total += floatval($usage->cost);
+                }
+            }
+        }
+        return $total;
+    }
+
+    /**
      * Create a usage-deduction invoice and immediately pay it from the client's credit.
      *
      * $lineItems (optional): [['description' => string, 'amount' => float], ...] for an

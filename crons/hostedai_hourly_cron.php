@@ -146,13 +146,9 @@ try {
                 foreach ($responseData->billing_by_workspace ?? [] as $workspace) {
                     foreach ($workspace->instances ?? [] as $instanceData) {
                         $ic = floatval($instanceData->total_cost ?? 0);
-                        if ($ic <= 0 && isset($instanceData->intervals)) {
-                            foreach ($instanceData->intervals as $iv) {
-                                foreach ((array)($iv->Resources ?? []) as $rk => $ru) {
-                                    if ($rk === 'total_cost') { continue; }
-                                    $ic += floatval($ru->cost ?? 0);
-                                }
-                            }
+                        if ($ic <= 0) {
+                            // VM/KVM omit total_cost — sum all resource costs (GPU incl.).
+                            $ic = $helper->sumInstanceResourceCost($instanceData);
                         }
                         $compute += $ic;
                     }

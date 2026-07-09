@@ -159,13 +159,12 @@ try {
                             }
                         }
 
-                        // The API omits per-instance total_cost for VM-nature instances
-                        // (only pod/GPUaaS instances carry it). Without this fallback those
-                        // lines invoice at $0. Sum the itemized resource costs instead.
+                        // The API omits per-instance total_cost for VM/KVM-nature instances
+                        // (only pod/GPUaaS instances carry it). Without a fallback those
+                        // lines invoice at $0. Sum ALL resource costs generically so no
+                        // dimension is missed (GPU, disk, public IP, bandwidth, …).
                         if ($instanceTotalCost <= 0) {
-                            $instanceTotalCost = $cpuTotal + $ramTotal + $diskTotal + $gpuTotal
-                                + $subscriptionTotal + $tflopsTotal + $vramTotal
-                                + $diskStorageTotal + $publicIpTotal;
+                            $instanceTotalCost = $helper->sumInstanceResourceCost($instanceData);
                         }
 
                         $cpu = number_format($cpuTotal, 2);
