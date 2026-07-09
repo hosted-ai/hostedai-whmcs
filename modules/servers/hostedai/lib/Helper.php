@@ -383,21 +383,30 @@ class Helper
     }
 
     /**
-     * Total cost of an instance = sum of every resource cost across its billing
-     * intervals, EXCLUDING the roll-up "total_cost" key. Used as the fallback when the
-     * API omits per-instance `total_cost` (VM/KVM-nature instances), so no cost dimension
-     * (CPU, RAM, GPU, disk, public IP, bandwidth, …) is ever dropped from the bill.
+     * Total cost of an instance = sum of every cost across its billing intervals, over
+     * all three cost buckets the API returns per interval:
+     *   - Resources (CPU, RAM, GPU, vRAM, TFlops, Ephemeral/Disk Storage, Public IP, …)
+     *   - Services  (service-policy charges)
+     *   - pci_dev   (PCI / GPU passthrough cards)
+     * matching how the backend composes per-instance `total_cost`. The roll-up
+     * "total_cost" key inside Resources is skipped so it is not double-counted.
+     *
+     * Used as the fallback when the API omits per-instance `total_cost` (VM/KVM-nature
+     * instances), so no dimension — including Service and GPU-card (PCI) costs — is
+     * dropped from the bill.
      */
     public function sumInstanceResourceCost($instanceData)
     {
         $total = 0.0;
         foreach ((array) ($instanceData->intervals ?? []) as $interval) {
-            foreach ((array) ($interval->Resources ?? []) as $key => $usage) {
-                if ($key === 'total_cost') {
-                    continue;
-                }
-                if (is_object($usage) && isset($usage->cost)) {
-                    $total += floatval($usage->cost);
+            foreach (['Resources', 'Services', 'pci_dev'] as $bucket) {
+                foreach ((array) ($interval->{$bucket} ?? []) as $key => $entry) {
+                    if ($key === 'total_cost') {
+                        continue;
+                    }
+                    if (is_object($entry) && isset($entry->cost)) {
+                        $total += floatval($entry->cost);
+                    }
                 }
             }
         }
