@@ -3,6 +3,13 @@
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\HosteDai\Helper;
 
+// CLI-only. This script runs billing and suspend/terminate — it must never be
+// triggerable over HTTP. Reject any non-CLI (web) invocation before bootstrapping.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 $whmcspath = "";
 if (file_exists(dirname(__FILE__) . "/config.php"))
     require_once dirname(__FILE__) . "/config.php";
@@ -14,6 +21,28 @@ if (!empty($whmcspath)) {
 }
 
 $helper = new Helper();
+
+/**
+ * Build a Helper bound to the hosted·ai server the given service is provisioned on.
+ * Each WHMCS service may live on a different hosted·ai cluster; a parameter-less
+ * `new Helper()` falls back to the first enabled hostedai server and would query the
+ * wrong cluster (team-not-found → zero billing). Returns null if no server is found.
+ */
+function hostedaiHelperForService($sid)
+{
+    $service = Capsule::table('tblhosting')->where('id', $sid)->first();
+    if (!$service) {
+        return null;
+    }
+    $server = Capsule::table('tblservers')->where('id', $service->server)->first();
+    if (!$server || empty($server->hostname)) {
+        return null;
+    }
+    return new Helper([
+        'serverhostname' => $server->hostname,
+        'serverpassword' => decrypt($server->password),
+    ]);
+}
 
 try {
     logActivity("HostedAI Cron started on " . date('Y-m-d H:i:s'));
@@ -29,14 +58,38 @@ try {
             logActivity("DEBUG MODE: Running invoice generation on day " . date('d') . " instead of 1st");
         }
 
-        // Generate bills and create invoices
-        $teams = Capsule::table('mod_hostdaiteam_details')->get();
+        // Generate bills and create invoices — monthly mode only
+        $teams = Capsule::table('mod_hostdaiteam_details')
+            ->where(function ($q) {
+                $q->where('billing_mode', 'monthly')->orWhereNull('billing_mode');
+            })->get();
 
         foreach ($teams as $team) {
             // Production: Basic processing log (debug info removed for security)
             logActivity("Processing billing for TeamID {$team->teamid}");
-            
-            $response = $helper->generateBill($team->teamid);
+
+            // Idempotency guard — the cron bills last month and runs on the 1st, so an
+            // invoice already dated this month means this service was billed for the
+            // period in a prior run. Skip it to avoid a duplicate invoice if the cron
+            // fires twice (scheduler overlap, manual re-run, or web trigger). invoiceid
+            // "0"/"" is treated as "never billed" (empty() is true for both).
+            if (!empty($team->invoiceid)) {
+                $lastInvoice = Capsule::table('tblinvoices')->where('id', $team->invoiceid)->first();
+                if ($lastInvoice && strtotime($lastInvoice->date) >= strtotime(date('Y-m-01'))) {
+                    logActivity("Skipping TeamID {$team->teamid} — already invoiced this month (#{$team->invoiceid} dated {$lastInvoice->date})");
+                    continue;
+                }
+            }
+
+            // Bind the API helper to the cluster this service actually lives on. Without
+            // this, billing queries hit the wrong hosted·ai server and silently return zero.
+            $teamHelper = hostedaiHelperForService($team->sid);
+            if (!$teamHelper) {
+                logActivity("No server found for service {$team->sid} (TeamID {$team->teamid}), skipping");
+                continue;
+            }
+
+            $response = $teamHelper->generateBill($team->teamid);
             logActivity("Billing response for TeamID {$team->teamid}: " . json_encode($response));
 
             // Always initialize invoice items regardless of main billing response
@@ -82,44 +135,28 @@ try {
 
                     foreach ($workspace->instances as $instanceId => $instanceData) {
                         $instanceName = $instanceData->instance_name ?? $instanceId;
-                        $instanceTotalCost = floatval($instanceData->total_cost ?? 0);
 
-                        // Aggregate costs across all intervals (months)
-                        $cpuTotal = 0; $ramTotal = 0; $diskTotal = 0; $gpuTotal = 0;
-                        $subscriptionTotal = 0; $tflopsTotal = 0; $vramTotal = 0;
+                        // Per-category breakdown (Resources + Services + PCI), summed
+                        // across intervals. Data-driven — whatever the API returns is what
+                        // shows, so Service / GPU-card (PCI) lines appear when present.
+                        $breakdown = $helper->instanceCostBreakdown($instanceData);
 
-                        if (isset($instanceData->intervals)) {
-                            foreach ($instanceData->intervals as $month => $intervalData) {
-                                $res = $intervalData->Resources ?? new \stdClass();
-                                $cpuTotal += floatval($res->CPU->cost ?? 0);
-                                $ramTotal += floatval($res->RAM->cost ?? 0);
-                                $diskTotal += floatval($res->{'Ephemeral Storage'}->cost ?? 0);
-                                $gpuTotal += floatval($res->GPU->cost ?? 0);
-                                $subscriptionTotal += floatval($res->{'Subscription Rate'}->cost ?? 0);
-                                $tflopsTotal += floatval($res->TFlops->cost ?? 0);
-                                $vramTotal += floatval($res->vRAM->cost ?? 0);
+                        // Amount = full breakdown sum (Resources + Services + PCI), which
+                        // matches the platform's per-instance total_billing / UI figure.
+                        // Do NOT use instance.total_cost: it is Resources-only and omits the
+                        // Service/PCI fee (verified live: total_cost 18.30 vs full 26.43).
+                        $instanceTotalCost = array_sum($breakdown);
+
+                        // Build an itemized description from the breakdown (one line per
+                        // non-zero category). Reconciles with the billed amount.
+                        $descLines = "Workspace: {$workspaceName}\nInstance: {$instanceName} ({$instanceId})";
+                        foreach ($breakdown as $label => $amount) {
+                            if ($amount == 0) {
+                                continue;
                             }
+                            $descLines .= "\n" . $label . ': $ ' . number_format($amount, 4);
                         }
-
-                        $cpu = number_format($cpuTotal, 2);
-                        $ram = number_format($ramTotal, 2);
-                        $disk = number_format($diskTotal, 2);
-                        $gpu = number_format($gpuTotal, 2);
-                        $subscription = number_format($subscriptionTotal, 2);
-                        $tflops = number_format($tflopsTotal, 2);
-                        $vram = number_format($vramTotal, 2);
-
-                        $description = <<<DESC
-                                        Workspace: {$workspaceName}
-                                        Instance: {$instanceName} ({$instanceId})
-                                        CPU ………………………………………………………… \$ {$cpu}
-                                        RAM ………………………………………………………… \$ {$ram}
-                                        Ephemeral Storage ……………………………… \$ {$disk}
-                                        GPU ………………………………………………………… \$ {$gpu}
-                                        Subscription Rate ……………………………… \$ {$subscription}
-                                        TFlops ……………………………………………………… \$ {$tflops}
-                                        vRAM ………………………………………………………… \$ {$vram}
-                                        DESC;
+                        $description = $descLines;
 
                         $invoiceItems["itemdescription{$itemCount}"] = $description;
                         $invoiceItems["itemamount{$itemCount}"] = $instanceTotalCost;
@@ -197,36 +234,9 @@ try {
                     }
                 }
 
-                // Add Team Metrics billing (if available)
-                if (!empty($responseData->team_metrics)) {
-                    $teamMetricsArray = (array)$responseData->team_metrics;
-                    $teamMetricsInterval = reset($teamMetricsArray);
-                    
-                    $teamRAM = number_format($teamMetricsInterval->RAM ?? 0, 2);
-                    $teamCPU = number_format($teamMetricsInterval->CPU ?? 0, 2);
-                    $teamGPU = number_format($teamMetricsInterval->GPU ?? 0, 2);
-                    $teamGRAM = number_format($teamMetricsInterval->GRAM ?? 0, 2);
-                    $teamTFlops = number_format($teamMetricsInterval->TFlops ?? 0, 2);
-                    $teamTotal = number_format($teamMetricsInterval->total_cost ?? 0, 2);
-
-                    if ($teamTotal > 0) {
-                        $description = <<<DESC
-                        Team-Level Resource Usage
-                        RAM ..................................... \$ {$teamRAM}
-                        CPU ..................................... \$ {$teamCPU}
-                        GPU ..................................... \$ {$teamGPU}
-                        GRAM .................................... \$ {$teamGRAM}
-                        TFlops .................................. \$ {$teamTFlops}
-                        DESC;
-
-                        $invoiceItems["itemdescription{$itemCount}"] = $description;
-                        $invoiceItems["itemamount{$itemCount}"] = $teamMetricsInterval->total_cost; // Use raw float for invoice
-                        $invoiceItems["itemtaxed{$itemCount}"] = true;
-
-                        $totalWithoutTax += $teamMetricsInterval->total_cost;
-                        $itemCount++;
-                    }
-                }
+                // Team Metrics billing is handled in the "ALWAYS process" section below.
+                // group-by-workspace does NOT return team_metrics, so it must be fetched
+                // from the detailed team-billing endpoint (generateDetailedTeamBill).
                 }
                 } else {
                     logActivity("No workspace billing data found for TeamID {$team->teamid}");
@@ -236,21 +246,30 @@ try {
             }
 
             // ALWAYS process Shared Storage billing (regardless of main billing status)
-            $sharedStorageResponse = $helper->getTeamSharedStorageBilling($team->teamid);
+            $sharedStorageResponse = $teamHelper->getTeamSharedStorageBilling($team->teamid);
             if ($sharedStorageResponse['httpcode'] === 200 && !empty($sharedStorageResponse['result'])) {
                 $sharedStorageData = $sharedStorageResponse['result'];
                 logActivity("Shared storage billing for TeamID {$team->teamid}: " . json_encode($sharedStorageData));
                 
                 if (isset($sharedStorageData->details) && !empty($sharedStorageData->details)) {
-                    foreach ($sharedStorageData->details as $volumeName => $volumeData) {
-                        $volumeArray = (array)$volumeData;
-                        $interval = reset($volumeArray);
-                        
-                        $cost = number_format($interval->cost ?? 0, 2);
-                        $hoursDecimal = $interval->hours ?? 0;
-                        $hoursFormatted = $helper->formatHoursMinutes($hoursDecimal);
-                        
-                        if ($cost > 0) {
+                    foreach ($sharedStorageData->details as $storageId => $volumeData) {
+                        // cost/hours are NOT direct properties of details[*]; they live under
+                        // details[*].intervals[intervalKey]. The old flat reset() read the
+                        // "intervals" map itself and always saw cost=0 → shared storage was
+                        // never billed. Aggregate across intervals like the gpuaas-pool block.
+                        $volumeName = $volumeData->storage_name ?? $storageId;
+                        $intervals  = isset($volumeData->intervals) ? (array)$volumeData->intervals : [];
+
+                        $volCost = 0.0; $volHours = 0.0;
+                        foreach ($intervals as $intervalData) {
+                            $volCost  += floatval($intervalData->cost ?? 0);
+                            $volHours += floatval($intervalData->hours ?? 0);
+                        }
+
+                        $cost = number_format($volCost, 2);
+                        $hoursFormatted = $helper->formatHoursMinutes($volHours);
+
+                        if ($volCost > 0) {
                             $description = <<<DESC
                             Shared Storage: {$volumeName}
                             Hours ................................... {$hoursFormatted}
@@ -258,10 +277,10 @@ try {
                             DESC;
 
                             $invoiceItems["itemdescription{$itemCount}"] = $description;
-                            $invoiceItems["itemamount{$itemCount}"] = $interval->cost; // Use raw float for invoice
+                            $invoiceItems["itemamount{$itemCount}"] = $volCost; // raw float for invoice
                             $invoiceItems["itemtaxed{$itemCount}"] = true;
 
-                            $totalWithoutTax += $interval->cost;
+                            $totalWithoutTax += $volCost;
                             $itemCount++;
                         }
                     }
@@ -271,7 +290,7 @@ try {
             }
 
             // ALWAYS process Enhanced GPUaaS Pool billing with Ephemeral Storage (regardless of main billing status)
-            $gpuaasPoolResponse = $helper->getTeamGpuaasPoolBilling($team->teamid);
+            $gpuaasPoolResponse = $teamHelper->getTeamGpuaasPoolBilling($team->teamid);
             if ($gpuaasPoolResponse['httpcode'] === 200 && !empty($gpuaasPoolResponse['result'])) {
                 $gpuaasPoolData = $gpuaasPoolResponse['result'];
                 logActivity("GPUaaS pool billing for TeamID {$team->teamid}: " . json_encode($gpuaasPoolData));
@@ -283,8 +302,9 @@ try {
                         
                         $gpuCost = number_format($interval->GPU->cost ?? 0, 2);
                         $vramCost = number_format($interval->vRAM->cost ?? 0, 2);
-                        $subscriptionCost = number_format($interval->SubscriptionRate->cost ?? 0, 2);
-                        $ephemeralStorageCost = number_format($interval->EphimeralStorage->cost ?? 0, 2);
+                        // JSON keys carry spaces: "Subscription Rate" / "Ephemeral Storage".
+                        $subscriptionCost = number_format($interval->{'Subscription Rate'}->cost ?? 0, 2);
+                        $ephemeralStorageCost = number_format($interval->{'Ephemeral Storage'}->cost ?? 0, 2);
                         $cpuCost = number_format($interval->CPU->cost ?? 0, 2);
                         $ramCost = number_format($interval->RAM->cost ?? 0, 2);
                         $intervalHoursDecimal = $interval->interval_hours ?? 0;
@@ -316,9 +336,52 @@ try {
                 logActivity("GPUaaS pool billing failed or empty for TeamID {$team->teamid} - HTTP Code: " . ($gpuaasPoolResponse['httpcode'] ?? 'unknown'));
             }
 
+            // ALWAYS process Team Metrics billing (team-level GPUaaS consumption).
+            // team_metrics is consumption-based (avg RAM/CPU/GPU/GRAM/TFlops from
+            // team_metrics_daily), a SEPARATE category from pool subscriptions
+            // (gpuaas-pool) and per-instance billing — no double-counting. It is
+            // only returned by the detailed team-billing endpoint, not by
+            // group-by-workspace, so it must be fetched separately.
+            $teamMetricsResponse = $teamHelper->generateDetailedTeamBill($team->teamid);
+            if ($teamMetricsResponse['httpcode'] === 200 && !empty($teamMetricsResponse['result']->team_metrics)) {
+                $teamMetricsArray    = (array)$teamMetricsResponse['result']->team_metrics;
+                $teamMetricsInterval = reset($teamMetricsArray);
+
+                $teamMetricsTotal = floatval($teamMetricsInterval->total_cost ?? 0);
+                if ($teamMetricsTotal > 0) {
+                    $teamRAM    = number_format($teamMetricsInterval->RAM ?? 0, 2);
+                    $teamCPU    = number_format($teamMetricsInterval->CPU ?? 0, 2);
+                    $teamGPU    = number_format($teamMetricsInterval->GPU ?? 0, 2);
+                    $teamGRAM   = number_format($teamMetricsInterval->GRAM ?? 0, 2);
+                    $teamTFlops = number_format($teamMetricsInterval->TFlops ?? 0, 2);
+
+                    $description = <<<DESC
+                    Team-Level Resource Usage
+                    RAM ..................................... \$ {$teamRAM}
+                    CPU ..................................... \$ {$teamCPU}
+                    GPU ..................................... \$ {$teamGPU}
+                    GRAM .................................... \$ {$teamGRAM}
+                    TFlops .................................. \$ {$teamTFlops}
+                    DESC;
+
+                    $invoiceItems["itemdescription{$itemCount}"] = $description;
+                    $invoiceItems["itemamount{$itemCount}"]      = $teamMetricsInterval->total_cost;
+                    $invoiceItems["itemtaxed{$itemCount}"]       = true;
+
+                    $totalWithoutTax += $teamMetricsTotal;
+                    $itemCount++;
+                    logActivity("Team metrics billing for TeamID {$team->teamid}: \${$teamMetricsTotal}");
+                }
+            } else {
+                logActivity("Team metrics billing empty for TeamID {$team->teamid} - HTTP Code: " . ($teamMetricsResponse['httpcode'] ?? 'unknown'));
+            }
+
             // Generate Invoice only if there are any costs
             if ($totalWithoutTax > 0) {
                 logActivity("Creating invoice for TeamID {$team->teamid} with total amount: \${$totalWithoutTax}");
+                // WHMCS invoices follow the client's currency (there is no per-invoice
+                // currency); warn if the API bills in a different one.
+                $helper->warnOnCurrencyMismatch($team->uid, $currencyCode);
                 $invoiceResult = $helper->createInvoice($team->uid, $invoiceItems, $currencyCode);
                 logActivity("Invoice creation response for UID {$team->uid}: " . json_encode($invoiceResult));
                 if (isset($invoiceResult['result']) && $invoiceResult['result'] === 'success') {
@@ -333,8 +396,11 @@ try {
             }
         }
     }
-    // Suspension & Termination on overdue
-    $invoices = Capsule::table('mod_hostdaiteam_details')->get();
+    // Suspension & Termination on overdue — monthly mode only (prepaid handled by hourly cron)
+    $invoices = Capsule::table('mod_hostdaiteam_details')
+        ->where(function ($q) {
+            $q->where('billing_mode', 'monthly')->orWhereNull('billing_mode');
+        })->get();
 
     foreach ($invoices as $invoice) {
         $invoice_date = Capsule::table('tblinvoices')->where('id', $invoice->invoiceid)->where('status', 'Unpaid')->value('date');
@@ -344,18 +410,36 @@ try {
             $suspend_days = $product->configoption8;
             $terminate_days = $product->configoption9;
     
-            if ($suspend_days !== null && $terminate_days !== null) {
+            // Both day-counts must be real numbers. A blank configoption is stored as
+            // '' (not null), which passed the old `!== null` guard; then `$daysDiff > ''`
+            // is true for any positive diff under PHP 8 (number cast to string, "40" > ""),
+            // so a product with a blank "Termination Days" would TERMINATE (delete) every
+            // overdue team. Require numeric and cast to int; blank => skip this service.
+            if (is_numeric($suspend_days) && is_numeric($terminate_days)) {
+                $suspend_days   = (int) $suspend_days;
+                $terminate_days = (int) $terminate_days;
                 $invoiceDate = new DateTime($invoice_date);
                 $today = new DateTime();
                 $daysDiff = $invoiceDate->diff($today)->days;
-    
+
                 logActivity("Checking service ID {$invoice->sid} - Days since invoice: {$daysDiff}");
-    
-                if ($daysDiff > $terminate_days) {
+
+                // A service must be SUSPENDED before it can be terminated — never
+                // destroy a still-Active service in one step. An Active service past the
+                // suspend window is suspended (grace); only an already-Suspended service
+                // past the terminate window is terminated (on a later run). This keeps
+                // the dunning ladder intact regardless of how often the cron fires.
+                $svc         = Capsule::table('tblhosting')->where('id', $invoice->sid)->first();
+                $isSuspended = $svc && $svc->domainstatus === 'Suspended';
+
+                if ($daysDiff > $terminate_days && $isSuspended) {
                     $helper->suspendTerminate_service($invoice->sid , $invoice->pid , 'ModuleTerminate');
                     logActivity("Service ID {$invoice->sid} TERMINATED - Days since invoice: {$daysDiff} (Limit: {$terminate_days})");
-                } elseif ($daysDiff > $suspend_days) {
+                } elseif ($daysDiff > $suspend_days && !$isSuspended) {
                     $helper->suspendTerminate_service($invoice->sid, $invoice->pid, 'ModuleSuspend');
+                    Capsule::table('mod_hostdaiteam_details')
+                        ->where('sid', $invoice->sid)
+                        ->update(['suspended_reason' => 'invoice_overdue', 'updated_at' => date('Y-m-d H:i:s')]);
                     logActivity("Service ID {$invoice->sid} SUSPENDED - Days since invoice: {$daysDiff} (Limit: {$suspend_days})");
                 }
             } else {
