@@ -14,7 +14,7 @@ Integrate your WHMCS Billing platform with hosted·ai
 Download the `main.zip` file and SCP to your WHMCS server, or clone it directly from github with the following command from within your WHMCS web directory. To grab the latest version:
 
 ```plaintext git clone
- git clone https://github.com/hostedai/hostedai-whmcs.git
+ git clone https://github.com/hosted-ai/hostedai-whmcs.git
 ```
 
 Navigate into the extracted folder:
@@ -23,10 +23,19 @@ Navigate into the extracted folder:
 cd hostedai-whmcs
 ```
 
-Upload the `hostedai_cron.php` file to the `<whmcs_dir>/crons/` directory on your server.
+Upload the cron scripts to the `<whmcs_dir>/crons/` directory on your server.
+`hostedai_cron.php` runs the monthly billing; `hostedai_hourly_cron.php` runs the
+prepaid (hourly wallet) billing — upload it too if you use prepaid mode.
 
 ```plaintext example
-cp crons/hostedai_cron.php /<whmcs_path>/crons/
+cp crons/hostedai_cron.php crons/hostedai_hourly_cron.php /<whmcs_path>/crons/
+```
+
+For prepaid mode, also upload the `InvoicePaid` hook (auto-unsuspend on top-up) to
+`<whmcs_dir>/includes/hooks/`:
+
+```plaintext example
+cp includes/hooks/hostedai_wallet.php /<whmcs_path>/includes/hooks/
 ```
   
   
@@ -84,7 +93,7 @@ Navigate to _System Settings_ \-> _Servers_ \-> _Add New Server_.
 
 Click _Go to Advanced Mode_.
 
-Fill in the _Name_ and _Hostname_ fields.S
+Fill in the _Name_ and _Hostname_ fields.
 ![image](https://github.com/user-attachments/assets/e27e37b3-8177-4240-9101-133b44a049ae)
 
 Skip the **Nameservers** section
@@ -141,7 +150,7 @@ A `Welcome Email`can also be set if required
 
 ![image](https://github.com/user-attachments/assets/352bb0d0-294d-41f1-9f80-9c7873ae7ac1)
 
-On the `Pricing` tab, choose a Payment Type,
+On the `Pricing` tab, choose a Payment Type.
 
 ## Recurring Products
 
@@ -166,6 +175,11 @@ Now you can select the hosted·ai specific details
 
 Navigate to the `Module Settings` tab and complete the following configurations.
 
+> **Prepaid wallet mode:** `Billing Mode` and the wallet options (min balance, initial
+> credit, auto top-up) are documented in the
+> [Administrator Guide](docs/ADMINISTRATOR_GUIDE.md). The steps below cover the
+> policy/access settings common to both billing modes.
+
 * In the `Module Name` field, select `hosted·ai`.
 * `Server Group`can be left as `None`.
 * For `Pricing Policy`, select a suitable policy based on the product you are creating.
@@ -175,7 +189,6 @@ Navigate to the `Module Settings` tab and complete the following configurations.
 * Enter the`No. of Suspension Days`. The number of days an invoice should be unpaid before automatic suspension of the team.
 * Under `Resources Policy`, select the policy which contains the appropriate resource access or restrictions based on the new product.
 * Choose an `Instance Type Policy` which allows the use of the desired Instance Types.
-* For `Role`, select `Team Admin`.
 * Provide the `Login URL`. The URL of your hosted·ai user panel, users will be redirected there to login.
 * Enter `No. of Termination Days`. The number of days after which an invoice remains unpaid that the a team and all its resources would be deleted.
 
