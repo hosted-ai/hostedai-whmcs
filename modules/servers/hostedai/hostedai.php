@@ -8,7 +8,7 @@ if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
 
-define('HOSTEDAI_MODULE_VERSION', '2.4.0');
+define('HOSTEDAI_MODULE_VERSION', '2.4.1');
 
 function hostedai_MetaData()
 {
@@ -216,16 +216,59 @@ function hostedai_ConfigOptions(array $params)
             'FriendlyName' => 'Login URL',
             'Type' => 'text',
             'Size' => '255',
+            'Description' => 'Login button target; blank = default panel.',
         ),
         'suspentionDays' => array(
-            'FriendlyName' => 'No. of Suspension Days',
+            'FriendlyName' => 'Suspension Days (monthly)',
             'Type' => 'text',
             'Size' => '25',
+            'Description' => 'Days overdue before auto-suspend. Blank = off. Monthly only.',
         ),
         'termminationDays' => array(
-            'FriendlyName' => 'No. of Termination Days',
+            'FriendlyName' => 'Termination Days (monthly)',
             'Type' => 'text',
             'Size' => '25',
+            'Description' => 'Days overdue before auto-terminate. Blank = off. Monthly only.',
+        ),
+        'billing_mode' => array(
+            'FriendlyName' => 'Billing Mode',
+            'Type' => 'dropdown',
+            'Options' => 'monthly,prepaid',
+            'Description' => 'monthly = invoice at end of month; prepaid = deduct from wallet each hour',
+        ),
+        'min_balance' => array(
+            'FriendlyName' => 'Min Wallet Balance ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Default' => '1.00',
+            'Description' => 'Suspend when wallet drops to or below this amount (prepaid mode only)',
+        ),
+        // NOTE: options below are APPEND-ONLY. WHMCS maps config options to
+        // configoption{N} by position — never insert new options above this line
+        // or existing products' saved values will shift.
+        'initial_wallet_credit' => array(
+            'FriendlyName' => 'Initial Wallet Credit ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Description' => 'On provision, seed the prepaid wallet up to this amount (0/blank = off).',
+        ),
+        'initial_credit_mode' => array(
+            'FriendlyName' => 'Initial Credit Mode',
+            'Type' => 'dropdown',
+            'Options' => 'grant,invoice',
+            'Description' => 'grant = add credit for free (trial/demo); invoice = raise an Add Funds invoice the client must pay.',
+        ),
+        'auto_topup_threshold' => array(
+            'FriendlyName' => 'Auto Top-Up Threshold ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Description' => 'When wallet drops below this, auto-raise a top-up invoice (0/blank = off). Set above Min Wallet Balance.',
+        ),
+        'auto_topup_amount' => array(
+            'FriendlyName' => 'Auto Top-Up Amount ($)',
+            'Type' => 'text',
+            'Size' => '10',
+            'Description' => 'Amount of the auto top-up (Add Funds) invoice.',
         ),
 
     );
@@ -246,24 +289,28 @@ function hostedai_ConfigOptions(array $params)
  */
 function hostedai_TestConnection(array $params)
 {
-    
+    $success  = false;
+    $errorMsg = '';
+
     try {
 
         $helper = new Helper($params);
         $getPricingPolicy = $helper->getPolicyItems('pricing-policy');
-        if($getPricingPolicy['httpcode'] == 200){
-         
+
+        if (is_array($getPricingPolicy) && ($getPricingPolicy['httpcode'] ?? 0) == 200) {
             $success = true;
-        }
-        else{
-            $errorMsg = $getPricingPolicy['result']->message;
+        } else {
+            $result   = is_array($getPricingPolicy) ? ($getPricingPolicy['result'] ?? null) : null;
+            $errorMsg = (is_object($result) && isset($result->message))
+                ? $result->message
+                : 'Unable to connect to the hosted·ai API.';
         }
     } catch (Exception $e) {
         // Record the error in WHMCS's module log.
         logModuleCall(
-            'openprovider_plesk_license',
+            'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -334,30 +381,61 @@ function hostedai_CreateAccount(array $params)
         ];
         
 
-        if(isset($teamId) && $teamId != '')
-        {
+        // Team already provisioned for this service — nothing to do.
+        if (isset($teamId) && $teamId != '') {
+            return 'success';
+        }
 
-        }else{
-            
-            $getResponse = $helper->createHostedaiTeam($postData);
-            
-            if($getResponse['httpcode'] == 200)
-            {
+        $getResponse = $helper->createHostedaiTeam($postData);
 
-                if (isset($getResponse['result']->id)) {
-                    $teamId = $getResponse['result']->id;
+        if (!is_array($getResponse) || ($getResponse['httpcode'] ?? 0) != 200 || !isset($getResponse['result']->id)) {
+            return (is_array($getResponse) && isset($getResponse['result']->message))
+                ? $getResponse['result']->message
+                : 'Failed to create hosted·ai team.';
+        }
 
-                    $fields = ["team_id" => $teamId];
-                    $helper->insert_hostedai_custom_fields_value($serviceId, $pid, $fields);
+        $teamId      = $getResponse['result']->id;
+        $billingMode = $params['configoption10'] ?: 'monthly';
+        $helper->ensureWalletColumns();
 
-                    $billingCycle = $params['model']->billingcycle;
-                    if ($billingCycle === 'One Time') {
-                        $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert');
+        // Record the team linkage in WHMCS. The team already exists upstream at
+        // this point, so if either local write fails we remove it — leaving an
+        // orphaned hosted·ai team while reporting success would cause a duplicate
+        // team on the next provisioning retry.
+        $cfResult = $helper->insert_hostedai_custom_fields_value($serviceId, $pid, ["team_id" => $teamId]);
+        $tdResult = $helper->insert_teamDetail($userId, $serviceId, $pid, $teamId, 'insert', $billingMode);
+
+        if ($cfResult !== 'success' || $tdResult !== true) {
+            logActivity("hostedai CreateAccount: WHMCS linkage failed after creating team {$teamId} — rolling back");
+            $helper->terminateHostedaiTeam($teamId);
+            $helper->delete_teamDetail($serviceId, $pid);
+            $helper->insert_hostedai_custom_fields_value($serviceId, $pid, ["team_id" => '']);
+            return 'Provisioning failed: could not record team details in WHMCS.';
+        }
+
+        // Initial wallet credit (prepaid only) so the account does not start at $0.
+        // grant   = add credit for free, topping the wallet UP TO the amount
+        //           (won't stack if the shared wallet already has funds).
+        // invoice = raise an Add Funds invoice the client must pay to activate.
+        if ($billingMode === 'prepaid') {
+            $initialCredit = floatval($params['configoption12'] ?? 0);
+            if ($initialCredit > 0) {
+                $mode = ($params['configoption13'] ?? 'grant') === 'invoice' ? 'invoice' : 'grant';
+                if ($mode === 'invoice') {
+                    $helper->createAddFundsInvoice($userId, $initialCredit);
+                    logActivity("hostedai CreateAccount: raised initial Add Funds invoice \${$initialCredit} for UID {$userId}");
+                } else {
+                    $current = $helper->getClientCreditBalance($userId) ?? 0;
+                    $gap = round($initialCredit - $current, 2);
+                    if ($gap > 0) {
+                        localAPI('AddCredit', [
+                            'clientid'    => $userId,
+                            'amount'      => $gap,
+                            'description' => 'hosted·ai initial wallet credit',
+                        ]);
+                        logActivity("hostedai CreateAccount: granted initial credit \${$gap} to UID {$userId} (wallet -> \${$initialCredit})");
                     }
                 }
-                
-            }else{
-                return $getResponse['result']->message;
             }
         }
 
@@ -366,7 +444,7 @@ function hostedai_CreateAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -405,7 +483,7 @@ function hostedai_SuspendAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -443,7 +521,7 @@ function hostedai_UnsuspendAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -487,7 +565,7 @@ function hostedai_TerminateAccount(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -509,11 +587,22 @@ function hostedai_ChangePackage(array $params)
 {
     try {
         $helper = new Helper($params);
-        $pricing_policy_id = $params['configoption1'];
-        $resource_policy_id = $params['configoption2'];
+        $pricing_policy_id       = $params['configoption1'];
+        $resource_policy_id      = $params['configoption2'];
+        $service_policy_id       = $params['configoption3'] ?? null;
+        $instance_type_policy_id = $params['configoption4'] ?? null;
+        $image_policy_id         = $params['configoption5'] ?? null;
         $teamId = $params['customfields']['team_id'];
 
-        $changePackage = $helper->changeHostedaiTeamPackage($pricing_policy_id, $resource_policy_id, $teamId); 
+        // Propagate all five policies on upgrade/downgrade (not just pricing + resource).
+        $changePackage = $helper->changeHostedaiTeamPackage(
+            $pricing_policy_id,
+            $resource_policy_id,
+            $teamId,
+            $service_policy_id,
+            $instance_type_policy_id,
+            $image_policy_id
+        );
         if($changePackage['status'] == 'success') {
             return 'success';
         } else {
@@ -525,7 +614,7 @@ function hostedai_ChangePackage(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -553,6 +642,66 @@ function hostedai_AdminServicesTabFields(array $params)
 
         $loginURL = !empty($params['configoption7']) ? $params['configoption7'] : '#';
         $helper = new Helper($params);
+
+        // Phase 6: wallet panel — built from DB only, no external API dependency
+        $serviceId   = $params['serviceid'];
+        $userId      = $params['userid'];
+        $wDetail     = Capsule::table('mod_hostdaiteam_details')->where('sid', $serviceId)->first();
+        $billingMode = $wDetail ? ($wDetail->billing_mode ?? 'monthly') : 'monthly';
+        $minBalance  = !empty($params['configoption11']) ? floatval($params['configoption11']) : 1.00;
+
+        if ($billingMode === 'prepaid') {
+            $cr      = localAPI('GetClientsDetails', ['clientid' => $userId, 'stats' => true]);
+            $balance = (isset($cr['result']) && $cr['result'] === 'success') ? floatval($cr['credit'] ?? 0) : null;
+            $balFmt  = $balance !== null ? '$' . number_format($balance, 2) : 'N/A';
+            $balStyle = ($balance !== null && $balance <= $minBalance)
+                ? 'color:#c0392b;font-weight:bold'
+                : 'color:#27ae60;font-weight:bold';
+            $modeLabel  = '<span class="label label-info" style="font-size:13px">prepaid</span>';
+            $walletRows = '
+                <tr><td style="width:45%"><strong>Wallet Balance</strong></td>
+                    <td style="' . $balStyle . '">' . $balFmt . '</td></tr>
+                <tr><td><strong>Min Balance</strong></td>
+                    <td>$' . number_format($minBalance, 2) . '</td></tr>
+                <tr><td><strong>Last Billed</strong></td>
+                    <td>' . htmlspecialchars($wDetail->last_billed_at ?? '—') . '</td></tr>
+                <tr><td><strong>Suspended Reason</strong></td>
+                    <td>' . htmlspecialchars($wDetail->suspended_reason ?? '—') . '</td></tr>
+                <tr><td><strong>Last Warning Sent</strong></td>
+                    <td>' . htmlspecialchars($wDetail->low_balance_notified_at ?? '—') . '</td></tr>';
+        } else {
+            $modeLabel  = '<span class="label label-default" style="font-size:13px">monthly</span>';
+            $walletRows = '';
+        }
+
+        $selMonthly = $billingMode === 'monthly' ? ' selected' : '';
+        $selPrepaid = $billingMode === 'prepaid' ? ' selected' : '';
+        $switchRow  = '
+                <tr>
+                    <td><strong>Switch Billing Mode</strong></td>
+                    <td>
+                        <select name="billing_mode_switch" class="form-control"
+                                style="width:auto;display:inline-block;min-width:120px">
+                            <option value="monthly"' . $selMonthly . '>Monthly</option>
+                            <option value="prepaid"' . $selPrepaid . '>Prepaid</option>
+                        </select>
+                        <span class="text-muted" style="margin-left:8px;font-size:12px">
+                            Click &ldquo;Save Changes&rdquo; to apply
+                        </span>
+                    </td>
+                </tr>';
+
+        $walletPanel = '
+            <div class="panel panel-info" style="max-width:600px">
+                <div class="panel-heading"><strong>Wallet &amp; Billing</strong></div>
+                <div class="panel-body" style="padding:0">
+                    <table class="table" style="margin:0">
+                        <tr><td style="width:45%"><strong>Billing Mode</strong></td>
+                            <td>' . $modeLabel . '</td></tr>
+                        ' . $walletRows . $switchRow . '
+                    </table>
+                </div>
+            </div>';
 
         $assets = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets";
 
@@ -586,10 +735,10 @@ function hostedai_AdminServicesTabFields(array $params)
                     
                     $members = $getTeamMembers['result']->members;
                     foreach ($members as $member) {
-                        $teamEmail = $member->user->email ?? '';
-                        $teamStatus = $member->status ?? '';
-                        $teamRole = $member->role->label ?? '';
-        
+                        $teamEmail  = htmlspecialchars($member->user->email ?? '', ENT_QUOTES, 'UTF-8');
+                        $teamStatus = htmlspecialchars($member->status ?? '', ENT_QUOTES, 'UTF-8');
+                        $teamRole   = htmlspecialchars($member->role->label ?? '', ENT_QUOTES, 'UTF-8');
+
                         $teamMemberHTML .= '<tbody>
                                 <tr>
                                     <td>' . $teamEmail . '</td>
@@ -634,17 +783,18 @@ function hostedai_AdminServicesTabFields(array $params)
                                 $used = $resource->used . " " . $unit . " (".$percentage."%)";
                             }
                             
-                            $imagePath = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets/images/".$resourceType.".svg";
-            
+                            $safeType  = htmlspecialchars($resourceType, ENT_QUOTES, 'UTF-8');
+                            $imagePath = $CONFIG['SystemURL'] . "/modules/servers/hostedai/assets/images/" . $safeType . ".svg";
+
                             $resourceHTML .= '<div class="col-lg-6 mt-2">
                                     <div class="overview-card">
                                         <div class="overview-card-header">
-                                            <img src="'. $imagePath .'" alt="'. $resourceType .'">
-                                            <h3>'.strtoupper($resourceType).'</h3>
+                                            <img src="'. $imagePath .'" alt="'. $safeType .'">
+                                            <h3>'.strtoupper($safeType).'</h3>
                                         </div>
                                         <div class="overview-card-detail">
-                                            <p>'.$used.'</p>
-                                            <p>'.$aval.'</p>
+                                            <p>'.htmlspecialchars($used, ENT_QUOTES, 'UTF-8').'</p>
+                                            <p>'.htmlspecialchars($aval, ENT_QUOTES, 'UTF-8').'</p>
                                         </div>
                                         <div class="progress">
                                             <div class="progress-bar" role="progressbar" aria-valuenow="'.$percentage.'" aria-valuemin="'.$percentage.'" aria-valuemax="'.$percentage.'" style="width:'.$percentage.'%">'.$percentage.'%</div>
@@ -657,7 +807,6 @@ function hostedai_AdminServicesTabFields(array $params)
                 
                         $informationHtml = '
                         <link href="' . $assets . '/css/style.css?v=' . $random . '" rel="stylesheet">
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/validator/13.7.0/validator.min.js"></script>
                         <script src="' . $assets . '/js/custom.js?v=' . $random . '"></script>
                 
                         <table class="ad_on_table_dash table table-striped" width="100%" cellspacing="0" cellpadding="0" border="0">
@@ -698,29 +847,84 @@ function hostedai_AdminServicesTabFields(array $params)
                 
                         return [
                             " Hosting Information" => $informationHtml,
+                            " Wallet & Billing"    => $walletPanel,
                         ];
-        
+
                     }
-    
+
                 }
-    
-    
-    
+
             }
 
         }
 
+        // Team API unavailable — still surface wallet info
+        return [" Wallet & Billing" => $walletPanel];
+
     } catch (Exception $e) {
-        // Record the error in WHMCS's module log.
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
     }
     return array();
+}
+
+/**
+ * Save handler for the Wallet & Billing admin tab.
+ *
+ * Called by WHMCS when admin saves the service page. Reads billing_mode_switch
+ * from POST and updates mod_hostdaiteam_details accordingly.
+ */
+function hostedai_AdminServicesTabFieldsSave(array $params)
+{
+    try {
+        $serviceId = $params['serviceid'];
+        // WHMCS delivers custom admin-tab fields via $_REQUEST, not $params.
+        // Fall back to $params for programmatic/test callers.
+        $newMode   = $_REQUEST['billing_mode_switch'] ?? $params['billing_mode_switch'] ?? null;
+
+        if (!in_array($newMode, ['monthly', 'prepaid'], true)) {
+            return;
+        }
+
+        $exists = Capsule::table('mod_hostdaiteam_details')->where('sid', $serviceId)->exists();
+        if (!$exists) {
+            return;
+        }
+
+        $current = Capsule::table('mod_hostdaiteam_details')
+            ->where('sid', $serviceId)
+            ->value('billing_mode');
+
+        if ($current === $newMode) {
+            return;
+        }
+
+        Capsule::table('mod_hostdaiteam_details')
+            ->where('sid', $serviceId)
+            ->update([
+                'billing_mode'            => $newMode,
+                'suspended_reason'        => null,
+                'last_billed_at'          => null,
+                'low_balance_notified_at' => null,
+                'updated_at'              => date('Y-m-d H:i:s'),
+            ]);
+
+        logActivity("hostedai: Admin switched service {$serviceId} billing_mode {$current} → {$newMode}");
+
+    } catch (Exception $e) {
+        logModuleCall(
+            'hostedai',
+            __FUNCTION__,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
+            $e->getMessage(),
+            $e->getTraceAsString()
+        );
+    }
 }
 
 /**
@@ -757,8 +961,6 @@ function hostedai_ClientArea(array $params)
         if($key != '') {
             $getTeamdata = $helper->getTeamDetail($key);
 
-            $getTeamdata = $helper->getTeamDetail($key);
-    
             if($getTeamdata && $getTeamdata['httpcode'] == 200)
             {
                 $getTeamMembers = $helper->getTeamMembers($key);
@@ -784,9 +986,31 @@ function hostedai_ClientArea(array $params)
                         }
                     }
             
+                    // Wallet vars for prepaid services
+                    $walletVars = [];
+                    $serviceId  = $params['serviceid'];
+                    $userId     = $params['clientsdetails']['userid'] ?? null;
+                    if ($userId) {
+                        $detail      = Capsule::table('mod_hostdaiteam_details')->where('sid', $serviceId)->first();
+                        $billingMode = $detail ? ($detail->billing_mode ?? 'monthly') : 'monthly';
+                        if ($billingMode === 'prepaid') {
+                            $creditResult = localAPI('GetClientsDetails', ['clientid' => $userId, 'stats' => true]);
+                            $balance      = floatval($creditResult['credit'] ?? 0);
+                            $minBalance   = floatval(!empty($params['configoption11']) ? $params['configoption11'] : 1.00);
+                            $walletVars   = [
+                                'walletBillingMode' => 'prepaid',
+                                'walletBalance'     => number_format($balance, 2),
+                                'walletMinBalance'  => number_format($minBalance, 2),
+                                'walletLastBilled'  => $detail->last_billed_at ?? null,
+                                'walletLowBalance'  => ($balance > $minBalance && $balance <= $minBalance * 2),
+                                'walletSuspended'   => isset($detail->suspended_reason) && $detail->suspended_reason === 'balance_zero',
+                            ];
+                        }
+                    }
+
                     return array(
                         'templatefile' => $templateFile,
-                        'templateVariables' => array(
+                        'templateVariables' => array_merge(array(
                             'responseData' => $responseData,
                             'teammembers' => $getTeamMembers ? $getTeamMembers['result']->members : '',
                             'resourcesData' => $resourceOverviewData,
@@ -795,7 +1019,7 @@ function hostedai_ClientArea(array $params)
                             'userEmail' => $params['clientsdetails']['email'],
                             'assets' => $assets,
                             'LANG' => $_ADDONLANG
-                        ),
+                        ), $walletVars),
                     );
     
                 }
@@ -809,7 +1033,7 @@ function hostedai_ClientArea(array $params)
         logModuleCall(
             'hostedai',
             __FUNCTION__,
-            $params,
+            array_diff_key($params, array_flip(['serverpassword', 'serverusername'])),
             $e->getMessage(),
             $e->getTraceAsString()
         );
@@ -823,3 +1047,6 @@ function hostedai_ClientArea(array $params)
         );
     }
 }
+
+// InvoicePaid hook lives in includes/hooks/hostedai_wallet.php
+// (WHMCS auto-loads that directory; add_hook() here is not guaranteed to fire)
