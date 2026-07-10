@@ -259,14 +259,17 @@ usage.
 1. On the 1st of the month, `hostedai_cron.php` runs.
 2. It queries `mod_hostdaiteam_details` for all services where
    `billing_mode = 'monthly'` (or NULL for legacy rows).
-3. For each service it makes up to three API calls and builds a multi-line invoice:
-   - **Main billing** — monthly base fee + per-workspace instance breakdown
-     (GPU, CPU, RAM, storage per interval)
+3. For each service it makes up to four API calls and builds a multi-line invoice:
+   - **Main billing** — monthly base fee + per-workspace, per-instance breakdown
+     (CPU, RAM, GPU, Ephemeral, Subscription, TFlops, vRAM, the service-policy fee and
+     any PCI/GPU-card cost per interval)
    - **Shared storage** — team shared volume costs (separate API call, always processed)
    - **GPUaaS pool** — GPU pool subscription and usage costs (separate API call, always processed)
+   - **Team resource usage** (`team_metrics`) — consumption-based team-level usage from the
+     detailed team-billing endpoint (`group-by-workspace` does not return it)
 4. If the combined total is greater than zero, a single WHMCS invoice is created with
    one line item per cost category and emailed to the client.
-5. If total = 0 across all three sources, no invoice is created and the skip is logged.
+5. If total = 0 across all four sources, no invoice is created and the skip is logged.
 
 > **Deduplication guard.** The cron skips any service whose stored invoice is already
 > dated in the current month, so a second run in the same month does not create a
@@ -285,15 +288,18 @@ wallet. Top-ups are done via the standard WHMCS credit mechanism
 
 **Hourly billing flow:**
 
-1. The hourly cron fetches the current-hour cost from the hosted·ai API.
-2. If the cost is non-zero, it creates a WHMCS invoice and immediately calls
+1. The hourly cron fetches the cost of the **previous complete clock hour**
+   (`HH:00…HH:59`, UTC) from the hosted·ai API.
+2. If the cost is non-zero, it creates an **itemized** WHMCS invoice (per-instance compute
+   plus shared-storage / GPUaaS-pool / team_metrics lines) and immediately calls
    `ApplyCredit` to pay it from the client's existing credit balance.
 3. It then reads the updated balance and evaluates thresholds.
 
-**55-minute overlap guard:** if the cron fires twice within 55 minutes (e.g. due to
-scheduler overlap), the second run skips billing for any service billed in the last
-55 minutes. This prevents double-billing when two cron processes briefly overlap at
-the top of the hour. The balance check still runs even when billing is skipped.
+**Hour-keyed idempotency:** the cron skips a service whose `last_billed_at` is already at
+or after the clock hour being billed (`last_billed_at >= billedHourKey`), so each clock
+hour is billed exactly once no matter when — or how often — the scheduler fires. A process
+lock additionally prevents two runs from overlapping. The balance check still runs even
+when billing is skipped.
 
 ---
 
@@ -381,7 +387,7 @@ works even if the remote server is temporarily unreachable.
 | Billing Mode | Current mode label (`prepaid`) |
 | Wallet Balance | Live balance from WHMCS credit. Shown in red when at or below the minimum threshold. |
 | Min Balance | Threshold from configoption11 |
-| Last Billed | Timestamp of the last successful hourly billing cycle |
+| Last Billed | UTC key of the last clock hour billed (drives the hourly idempotency guard) |
 | Suspended Reason | Current `suspended_reason` value, or — if none |
 | Last Warning Sent | Timestamp of the last low-balance email |
 
@@ -442,10 +448,11 @@ balances, sends low-balance alerts, and suspends or allows unsuspension.
 
 **Per-service logic (each iteration):**
 
-1. **55-minute guard** — if `last_billed_at` is within the last 55 minutes, skip
-   billing for this service (but continue to the balance check).
-2. **Billing** — call the hosted·ai API for current-hour cost. If cost > 0, create a
-   paid invoice and deduct from the client's credit balance.
+1. **Hour-keyed idempotency guard** — if `last_billed_at` is already at or after the clock
+   hour being billed, skip billing for this service (but continue to the balance check), so
+   a re-run in the same hour never double-bills.
+2. **Billing** — call the hosted·ai API for the **previous complete clock hour's** cost. If
+   cost > 0, create a paid, itemized invoice and deduct from the client's credit balance.
 3. **Balance check** — read the updated balance:
    - Balance ≤ threshold (`configoption11`, default $1.00): suspend the service (`balance_zero`).
    - threshold < balance ≤ 2× threshold: send low-balance warning if not sent in last 24 h.
@@ -488,7 +495,7 @@ Table: `mod_hostdaiteam_details`
 | `status` | VARCHAR | Internal status flag |
 | `billing_mode` | VARCHAR | `monthly` or `prepaid` |
 | `suspended_reason` | VARCHAR NULL | `balance_zero`, `invoice_overdue`, or NULL |
-| `last_billed_at` | DATETIME NULL | Timestamp of last successful hourly bill |
+| `last_billed_at` | DATETIME NULL | UTC key of the last clock hour billed (hourly idempotency) |
 | `low_balance_notified_at` | DATETIME NULL | Timestamp of last low-balance warning email |
 | `created_at` | DATETIME | Row creation time |
 | `updated_at` | DATETIME | Last modification time |
