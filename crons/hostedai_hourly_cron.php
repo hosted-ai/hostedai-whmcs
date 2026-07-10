@@ -66,11 +66,6 @@ if (!flock($lockFd, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 
-// 55 min = hourly cron interval (60 min) minus a 5-min overlap buffer.
-// Keeps billing idempotent when the cron scheduler fires slightly early or two
-// processes overlap at the start of an hour.
-const CRON_OVERLAP_GUARD_MINUTES = 55;
-
 try {
     logActivity("HostedAI Hourly Cron started on " . date('Y-m-d H:i:s'));
 
@@ -89,9 +84,9 @@ try {
         // service whose server was deleted/disabled would never suspend or top up.
         $teamHelper = hostedaiHelperForService($team->sid);
 
-        // Billing phase — guarded by CRON_OVERLAP_GUARD_MINUTES to prevent double-billing
-        // when two cron processes overlap. API errors also skip the balance check since
-        // we can't know the post-billing balance in that case.
+        // Billing phase — guarded by the process lock (concurrent runs) and the hour-keyed
+        // idempotency check below (double-billing the same clock hour). API errors also
+        // skip the balance check since we can't know the post-billing balance in that case.
         $skipBalanceCheck = false;
         $shouldBill = ($teamHelper !== null);
 
@@ -108,28 +103,34 @@ try {
             logActivity("Hourly cron: TeamID {$team->teamid} suspended (balance_zero) — skipping usage billing");
         }
 
-        if ($shouldBill && !empty($team->last_billed_at)) {
-            $secondsSince = time() - strtotime($team->last_billed_at);
-            if ($secondsSince < CRON_OVERLAP_GUARD_MINUTES * 60) {
-                logActivity("Hourly cron: Skipping billing for TeamID {$team->teamid} — last billed {$secondsSince}s ago");
-                $shouldBill = false;
-            }
+        // Bill the previous COMPLETE clock hour (UTC), aligned to the wall clock rather
+        // than to when the cron happens to fire. Unix time is UTC-aligned at multiples of
+        // 3600, so no timezone handling is needed. Clock-hour alignment makes the invoice
+        // line equal the user-panel per-hour figure (e.g. €26.00) and, with the hour-keyed
+        // idempotency below, bills each hour exactly once no matter when the scheduler runs.
+        $prevHourTop   = (intdiv(time(), 3600) - 1) * 3600;
+        $billedHourKey = gmdate('Y-m-d H:i:s', $prevHourTop); // UTC wall-clock hour key
+
+        // Idempotent per clock hour: skip if this team was already billed for this hour or
+        // a later one. Hour-keyed (not a fixed time-since window), so an early, late, or
+        // duplicate run never double-bills and never skips an hour. Both operands are UTC
+        // 'Y-m-d H:i:s' strings, so a lexicographic compare is a chronological compare.
+        if ($shouldBill && !empty($team->last_billed_at) && $team->last_billed_at >= $billedHourKey) {
+            logActivity("Hourly cron: Skipping billing for TeamID {$team->teamid} — hour {$billedHourKey} UTC already billed (last_billed_at {$team->last_billed_at})");
+            $shouldBill = false;
         }
 
         if ($shouldBill) {
             logActivity("Hourly cron: Processing billing for TeamID {$team->teamid} (UID {$team->uid})");
 
-            // One shared UTC window so every category query covers the identical hour.
-            // The billing API counts the window INCLUSIVE of both endpoints: a request of
-            // nominal width W minutes is billed as W+1 minutes. So a full 3600s (60-min)
-            // window bills 61 minutes and over-charges ~1.67%/hour (e.g. €26.43 instead of
-            // the €26.00 the user panel shows for the same hour). Request 3540s (59 min)
-            // so the inclusive count lands on exactly 60 minutes; consecutive hourly runs
-            // then tile cleanly (04:24..05:23, 05:24..06:23) with no gap or double-billed
-            // boundary minute. Verified live against team-billing/group-by-workspace.
-            $winEnd    = gmdate('Y-m-d\TH:i');
-            $winStart  = gmdate('Y-m-d\TH:i', time() - 3540);
-            $hourLabel = gmdate('Y-m-d H:00') . ' UTC';
+            // Window for the aligned clock hour computed above. The API counts the window
+            // INCLUSIVE of both endpoints (nominal W minutes → W+1 billed), so end =
+            // start + 3540s bills exactly the 60 minutes HH:00..HH:59 — i.e. the same
+            // clock-hour bucket the user panel shows as one heat-map cell (€26.00). A full
+            // 3600s window would bill 61 min and over-charge ~1.67%/hour.
+            $winStart  = gmdate('Y-m-d\TH:i', $prevHourTop);
+            $winEnd    = gmdate('Y-m-d\TH:i', $prevHourTop + 3540);
+            $hourLabel = gmdate('Y-m-d H:00', $prevHourTop) . ' UTC';
 
             $response = $teamHelper->generateHourlyBill($team->teamid, $winStart, $winEnd);
 
@@ -213,10 +214,12 @@ try {
                 $totalCost = 0.0;
                 foreach ($lineItems as $li) { $totalCost += $li['amount']; }
 
-                // Stamp last_billed_at (prevents redundant API calls for zero-usage teams)
+                // Stamp last_billed_at with the UTC hour key just billed — this is what the
+                // hour-keyed idempotency guard above compares against (also prevents
+                // redundant API calls for zero-usage teams).
                 Capsule::table('mod_hostdaiteam_details')
                     ->where('sid', $team->sid)
-                    ->update(['last_billed_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
+                    ->update(['last_billed_at' => $billedHourKey, 'updated_at' => date('Y-m-d H:i:s')]);
 
                 if ($totalCost > 0) {
                     $cats = implode(', ', array_map(function ($li) { return $li['description']; }, $lineItems));
