@@ -120,8 +120,15 @@ try {
             logActivity("Hourly cron: Processing billing for TeamID {$team->teamid} (UID {$team->uid})");
 
             // One shared UTC window so every category query covers the identical hour.
+            // The billing API counts the window INCLUSIVE of both endpoints: a request of
+            // nominal width W minutes is billed as W+1 minutes. So a full 3600s (60-min)
+            // window bills 61 minutes and over-charges ~1.67%/hour (e.g. €26.43 instead of
+            // the €26.00 the user panel shows for the same hour). Request 3540s (59 min)
+            // so the inclusive count lands on exactly 60 minutes; consecutive hourly runs
+            // then tile cleanly (04:24..05:23, 05:24..06:23) with no gap or double-billed
+            // boundary minute. Verified live against team-billing/group-by-workspace.
             $winEnd    = gmdate('Y-m-d\TH:i');
-            $winStart  = gmdate('Y-m-d\TH:i', time() - 3600);
+            $winStart  = gmdate('Y-m-d\TH:i', time() - 3540);
             $hourLabel = gmdate('Y-m-d H:00') . ' UTC';
 
             $response = $teamHelper->generateHourlyBill($team->teamid, $winStart, $winEnd);
