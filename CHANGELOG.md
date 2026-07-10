@@ -6,6 +6,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-07-10
+
 ### Added
 - **Prepaid wallet billing mode** — per-product `Billing Mode` (`monthly` or `prepaid`). In prepaid, hourly usage is deducted from the client's WHMCS credit balance (the wallet) via an auto-paid micro-invoice.
 - **Wallet funding at signup** — `Initial Wallet Credit` on provisioning: `grant` seeds the wallet for free (trials/demos), or `invoice` raises an Add Funds invoice the client pays to activate.
