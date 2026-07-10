@@ -5,6 +5,11 @@ invoices are created, how payments reconcile, how services are provisioned and
 billed, what happens on non-payment, the custom pieces we added on top of stock
 WHMCS, and where the data lives. Intended for onboarding and debugging.
 
+> ⚠️ **Known limitation — no currency conversion.** The module does **not** convert
+> between currencies. The hosted·ai pricing-policy currency and the WHMCS client's
+> currency **must be the same**, or invoices are booked in the wrong currency. See
+> [§8. Currency](#8-currency--no-conversion-currencies-must-match).
+
 ---
 
 ## 1. How invoices get generated (triggers, timing, recurring vs one-off)
@@ -56,15 +61,10 @@ mechanisms use it: **initial wallet credit** on provision (grant or invoice) and
   the wallet. The wallet is funded via **Add Funds** (its payment goes into
   credit). Hourly usage invoices are settled **from credit** (`ApplyCredit`), not
   through a gateway.
-- **Currency (important):** WHMCS has **no per-invoice currency** — `tblinvoices`
-  stores no currency column, so every invoice is denominated in the **client's
-  currency** (`tblclients.currency`). The hosted·ai API returns costs in the
-  **pricing policy's** currency. The module bills the API's numeric amount as-is, so
-  **the client's WHMCS currency must match the pricing-policy currency** — otherwise
-  the amount is recorded in the wrong currency (e.g. a £-priced policy booked as $).
-  Passing a `currency` parameter to `CreateInvoice` does not change this. Both crons
-  log a warning (`currency mismatch for UID …`) when they detect a mismatch; align
-  the client's currency with the policy to resolve it.
+- **Currency (important):** invoices follow the **client's** currency, the API bills
+  in the **pricing-policy's** currency, and the module does **no conversion** — so the
+  two must match. Full detail, rationale and how to comply in
+  [§8. Currency](#8-currency--no-conversion-currencies-must-match).
 
 ---
 
@@ -195,5 +195,45 @@ created, the module rolls the team back so a retry starts clean.
 - **Invoices / line items** → `tblinvoices` + `tblinvoiceitems`.
 - **Cron not running at all** → check it is registered in crontab (this is a
   manual install step; the deploy script does **not** register cron jobs).
+
+---
+
+## 8. Currency — no conversion (currencies must match)
+
+**Current state: the module performs no FX conversion.** It writes the API's numeric
+amount straight onto the invoice. Whether that number *means* €26 or $26 is decided
+entirely by the client's WHMCS currency — the module does not translate between them.
+
+Why this is a hard constraint, not a bug we can paper over:
+
+- **WHMCS has no per-invoice currency.** `tblinvoices` has no currency column; every
+  invoice is denominated in the **client's** currency (`tblclients.currency`). Passing
+  a `currency` parameter to `CreateInvoice` does **not** change this.
+- **The hosted·ai API bills in the pricing-policy's currency** (e.g. `currency_code:
+  "EUR"` in the `team-billing/*` responses).
+- The module bills the API amount **as-is**. So if the policy is in EUR and the client
+  is in USD, `€26.00` is recorded as `$26.00` — right number, wrong currency.
+
+**Requirement: the client's WHMCS currency must equal the pricing-policy currency.**
+
+How to comply:
+
+1. Check the policy currency — the `currency_code` field in the billing API response
+   (or the pricing policy in the hosted·ai admin panel).
+2. Set the WHMCS client to that currency (**Clients → Profile → Currency**) *before*
+   provisioning, and price the hostedai products in the same currency.
+3. Keep a single currency per server / server-group so one cluster's policies never
+   mix currencies across clients. (Sell EUR-priced clusters only to EUR clients, etc.)
+
+**Detection already in place:** both crons call `Helper::warnOnCurrencyMismatch()` and
+log `currency mismatch for UID …` to the Activity Log when the API currency differs
+from the client's. This only *warns* — it does not correct the amount. Treat that
+warning as "this client is being mis-billed until the currencies are aligned."
+
+**Not yet implemented (possible future work):** automatic conversion using WHMCS
+exchange rates (`tblcurrencies`) at bill time. This would allow selling a single-
+currency policy to clients of other currencies, at the cost of FX-rate drift,
+rounding, and invoices no longer matching the hosted·ai panel figure to the cent. Not
+built today — currencies must match instead.
 
 See also: [ADMINISTRATOR_GUIDE.md](ADMINISTRATOR_GUIDE.md).
