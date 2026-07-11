@@ -3,7 +3,7 @@
 Complete reference for installing, configuring, and operating the hosted·ai server
 module, including the prepaid wallet system introduced in v2.x.
 
-**Compatibility:** WHMCS 8.x · PHP 8.1+ · Module type: Server
+**Compatibility:** WHMCS 8.x–9.x · PHP 8.1+ (WHMCS 9.0 requires **PHP 8.2+**) · ionCube Loader · Module type: Server
 
 ---
 
@@ -59,8 +59,9 @@ service's custom fields.
 
 | Component | Minimum | Notes |
 |---|---|---|
-| WHMCS | 8.0 | Tested on 8.10–8.12 |
-| PHP | 8.1 | 8.2+ supported |
+| WHMCS | 8.0 | Tested on 8.10–8.12 and 9.0 |
+| PHP | 8.1 on WHMCS 8.x · **8.2** on WHMCS 9.0 | Use the version your WHMCS requires. **WHMCS 9.0 dropped PHP 8.1** — it needs 8.2 / 8.3 / 8.4 ([WHMCS 9.0 requirements](https://docs.whmcs.com/9-0/installation-guide/system-requirements/)). |
+| ionCube Loader | Required | Match the loader to your PHP version, and enable it for the **CLI** SAPI too — the cron runs under CLI, not only the web server. |
 | MySQL / MariaDB | 5.7 / 10.3 | Module creates its own table on first use |
 | hosted·ai API | Current | API token with admin privileges required |
 | Cron access | — | Server-level crontab or WHMCS cron hook |
@@ -106,6 +107,19 @@ root to match your environment.
 # Hourly billing + balance checks — runs every hour
 0 * * * * /usr/bin/php /var/www/whmcs/crons/hostedai_hourly_cron.php
 ```
+
+> **Use the right PHP binary.** The cron runs under the **CLI** PHP, which must be a
+> version your WHMCS supports (WHMCS 9.0: **8.2 / 8.3 / 8.4**) with the **ionCube Loader
+> enabled for CLI**. `/usr/bin/php` is often a different (or unsupported) version, so set
+> the full path explicitly (e.g. `/usr/bin/php8.3`). Verify a binary can bootstrap WHMCS
+> before scheduling it:
+>
+> ```bash
+> /path/to/php -r 'require "/path/to/whmcs/init.php"; echo "OK";'
+> ```
+>
+> `OK` = usable. `cannot be run by the ionCube Loader … PHP 8.x` means that version is
+> unsupported or missing the CLI ionCube Loader — pick a supported one.
 
 See [Cron Jobs](#cron-jobs) for what each script does.
 
@@ -547,6 +561,13 @@ non-zero resource usage in the hosted·ai API.
 `hostedai_AdminServicesTabFields` regardless of whether the hosted·ai API is
 reachable. If absent, check the PHP error log for exceptions and verify the module
 files are uploaded and readable.
+
+**Billing crons do nothing / cron log shows `cannot be run by the ionCube Loader … PHP 8.1`.**
+The crontab entry is running under a PHP version your WHMCS does not support — most
+often after upgrading to WHMCS 9.0, which dropped PHP 8.1. Point the crontab at a
+supported CLI PHP with the ionCube Loader enabled (WHMCS 9.0: 8.2 / 8.3 / 8.4) — see
+[Register cron jobs](#2-register-cron-jobs) for the verification command. See also
+[WHMCS: Troubleshooting ionCube Errors](https://help.whmcs.com/m/troubleshooting/l/700394-troubleshooting-ioncube-errors).
 
 > **Activity log.** All cron actions and mode switches are written to the WHMCS
 > activity log (**Utilities → Logs → Activity Log**). Search for `hostedai` or
