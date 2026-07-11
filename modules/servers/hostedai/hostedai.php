@@ -8,7 +8,7 @@ if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
 
-define('HOSTEDAI_MODULE_VERSION', '2.4.2');
+define('HOSTEDAI_MODULE_VERSION', '2.4.3');
 
 function hostedai_MetaData()
 {
@@ -219,16 +219,16 @@ function hostedai_ConfigOptions(array $params)
             'Description' => 'Login button target; blank = default panel.',
         ),
         'suspentionDays' => array(
-            'FriendlyName' => 'Suspension Days (monthly)',
+            'FriendlyName' => '[Monthly] Suspension Days',
             'Type' => 'text',
             'Size' => '25',
-            'Description' => 'Days overdue before auto-suspend. Blank = off. Monthly only.',
+            'Description' => 'MONTHLY mode only — ignored in prepaid. Days an invoice may stay unpaid before auto-suspend. Blank = off. (Prepaid suspends by wallet balance — see [Prepaid] Min Wallet Balance.)',
         ),
         'termminationDays' => array(
-            'FriendlyName' => 'Termination Days (monthly)',
+            'FriendlyName' => '[Monthly] Termination Days',
             'Type' => 'text',
             'Size' => '25',
-            'Description' => 'Days overdue before auto-terminate. Blank = off. Monthly only.',
+            'Description' => 'MONTHLY mode only — ignored in prepaid. Days an invoice may stay unpaid before auto-terminate (must already be suspended). Blank = off.',
         ),
         'billing_mode' => array(
             'FriendlyName' => 'Billing Mode',
@@ -237,38 +237,38 @@ function hostedai_ConfigOptions(array $params)
             'Description' => 'monthly = invoice at end of month; prepaid = deduct from wallet each hour',
         ),
         'min_balance' => array(
-            'FriendlyName' => 'Min Wallet Balance ($)',
+            'FriendlyName' => '[Prepaid] Min Wallet Balance ($)',
             'Type' => 'text',
             'Size' => '10',
             'Default' => '1.00',
-            'Description' => 'Suspend when wallet drops to or below this amount (prepaid mode only)',
+            'Description' => 'PREPAID mode only. Suspend once the wallet can no longer cover an hour of usage (or drops to/below this amount). No day-based grace in prepaid.',
         ),
         // NOTE: options below are APPEND-ONLY. WHMCS maps config options to
         // configoption{N} by position — never insert new options above this line
         // or existing products' saved values will shift.
         'initial_wallet_credit' => array(
-            'FriendlyName' => 'Initial Wallet Credit ($)',
+            'FriendlyName' => '[Prepaid] Initial Wallet Credit ($)',
             'Type' => 'text',
             'Size' => '10',
-            'Description' => 'On provision, seed the prepaid wallet up to this amount (0/blank = off).',
+            'Description' => 'PREPAID mode only. On provision, seed the wallet up to this amount (0/blank = off).',
         ),
         'initial_credit_mode' => array(
-            'FriendlyName' => 'Initial Credit Mode',
+            'FriendlyName' => '[Prepaid] Initial Credit Mode',
             'Type' => 'dropdown',
             'Options' => 'grant,invoice',
-            'Description' => 'grant = add credit for free (trial/demo); invoice = raise an Add Funds invoice the client must pay.',
+            'Description' => 'PREPAID mode only. grant = add credit for free (trial/demo); invoice = raise an Add Funds invoice the client must pay.',
         ),
         'auto_topup_threshold' => array(
-            'FriendlyName' => 'Auto Top-Up Threshold ($)',
+            'FriendlyName' => '[Prepaid] Auto Top-Up Threshold ($)',
             'Type' => 'text',
             'Size' => '10',
-            'Description' => 'When wallet drops below this, auto-raise a top-up invoice (0/blank = off). Set above Min Wallet Balance.',
+            'Description' => 'PREPAID mode only. When the wallet drops below this, auto-raise a top-up invoice (0/blank = off). Set above Min Wallet Balance.',
         ),
         'auto_topup_amount' => array(
-            'FriendlyName' => 'Auto Top-Up Amount ($)',
+            'FriendlyName' => '[Prepaid] Auto Top-Up Amount ($)',
             'Type' => 'text',
             'Size' => '10',
-            'Description' => 'Amount of the auto top-up (Add Funds) invoice.',
+            'Description' => 'PREPAID mode only. Amount of the auto top-up (Add Funds) invoice.',
         ),
 
     );
