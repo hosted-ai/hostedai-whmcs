@@ -167,6 +167,11 @@ You will need to set up a custom cron job to generate bills and create invoices,
 For example:
 0 0 * * * /usr/bin/php8.3 /var/www/clients/client1/web1/web/crons/hostedai_cron.php
 
+> **PHP version for the cron:** use a CLI PHP your WHMCS supports, with the ionCube
+> Loader enabled for CLI. **WHMCS 9.0 requires PHP 8.2+** (8.2/8.3/8.4) and does **not**
+> run on 8.1 — a cron on the wrong version fails silently with an ionCube error. See the
+> [Administrator Guide → Requirements](docs/ADMINISTRATOR_GUIDE.md#requirements).
+
 ![image](https://github.com/user-attachments/assets/2660bcf7-6b6c-48a2-82aa-cc9767ae40ef)
 
 Now you can select the hosted·ai specific details
