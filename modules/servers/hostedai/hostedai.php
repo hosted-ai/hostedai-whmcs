@@ -8,7 +8,7 @@ if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
 
-define('HOSTEDAI_MODULE_VERSION', '2.4.1');
+define('HOSTEDAI_MODULE_VERSION', '2.4.2');
 
 function hostedai_MetaData()
 {

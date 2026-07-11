@@ -6,6 +6,13 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-07-11
+
+> Module-only patch on top of platform **2.4.1** (ariel_1) — no API/platform change; the third digit tracks module iterations under SemVer.
+
+### Documentation
+- Documented the **WHMCS 9.0 / PHP 8.2+ requirement**. WHMCS 9.0 dropped PHP 8.1, so a cron left on PHP 8.1 fails silently with `cannot be run by the ionCube Loader … PHP 8.1` and stops billing. Updated the Administrator Guide requirements (WHMCS 8.x–9.x; PHP 8.2/8.3/8.4 on 9.0; ionCube Loader must be enabled for the **CLI** SAPI, not just the web server), added a "use the right PHP binary" note with a verify command (`php -r 'require ".../init.php"; echo "OK";'`) to the cron-setup step, and added a troubleshooting entry for the ionCube error. README cron example carries the same note. Sourced from the official [WHMCS 9.0 system requirements](https://docs.whmcs.com/9-0/installation-guide/system-requirements/).
+
 ## [2.4.1] - 2026-07-10
 
 ### Added
