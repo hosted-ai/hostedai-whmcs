@@ -6,6 +6,14 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.3] - 2026-07-11
+
+### Fixed
+- **Prepaid: suspend when the wallet can no longer cover an hour** — previously a prepaid service with an insufficient wallet was **never suspended** and ran for free while unpayable invoices piled up hourly. WHMCS `ApplyCredit` is all-or-nothing, so a full hourly charge against a short balance failed entirely: the balance never reached the min-balance floor and the `balance ≤ min` suspend never fired. Now `Helper::createAndPayHourlyInvoice()` checks the balance first and returns `insufficient` (creating no invoice) when it can't cover the hour, and the hourly cron suspends on that signal (prepaid has no day-based grace). It also reports the real payment outcome instead of logging a "Deducted" success when `ApplyCredit` actually failed.
+
+### Changed
+- **Clearer product config labels** — mode-specific Module Settings fields are now prefixed with their mode so it's obvious in the WHMCS UI which billing mode they apply to: `[Monthly] Suspension Days` / `[Monthly] Termination Days` and `[Prepaid] Min Wallet Balance` / `[Prepaid] Initial Wallet Credit` / `[Prepaid] Initial Credit Mode` / `[Prepaid] Auto Top-Up Threshold` / `[Prepaid] Auto Top-Up Amount`. Descriptions spell out that the day-based fields are monthly-only and prepaid suspends by wallet balance. (Display text only — config-option positions and stored values are unchanged.)
+
 ## [2.4.2] - 2026-07-11
 
 > Module-only patch on top of platform **2.4.1** (ariel_1) — no API/platform change; the third digit tracks module iterations under SemVer.
