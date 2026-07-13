@@ -467,6 +467,18 @@ class Helper
                 $i++;
             }
 
+            // Prepaid is pay-as-you-go: only bill what the wallet can cover. If the balance
+            // can't cover the full hour, do NOT create an unpayable invoice — signal
+            // 'insufficient' so the caller suspends (prepaid, no grace, no debt pile-up).
+            // WHMCS ApplyCredit is all-or-nothing: a full charge against a short balance
+            // fails entirely, which would otherwise leave the invoice unpaid and the wallet
+            // stuck above the suspend floor forever (the service would run for free).
+            $balance = $this->getClientCreditBalance($userId);
+            if ($balance !== null && $total > 0 && ($balance + 0.00001) < $total) {
+                logActivity("createAndPayHourlyInvoice: UID {$userId} balance \${$balance} < charge \${$total} — insufficient funds, not billing (suspend expected)");
+                return ['result' => 'insufficient', 'balance' => $balance, 'required' => $total];
+            }
+
             $invoice = localAPI('CreateInvoice', $params);
 
             if (!isset($invoice['result']) || $invoice['result'] !== 'success') {
@@ -478,7 +490,10 @@ class Helper
             $creditResult = localAPI('ApplyCredit', ['invoiceid' => $invoiceId, 'amount' => $total]);
             logActivity("Hourly deduction: UID={$userId} amount=\${$total} invoice=#{$invoiceId} items=" . count($items) . " credit=" . json_encode($creditResult));
 
-            return ['result' => 'success', 'invoiceid' => $invoiceId, 'credit_result' => $creditResult];
+            // Report the REAL payment outcome — 'success' only if ApplyCredit actually paid
+            // it. A created-but-unpaid invoice must not masquerade as a successful deduction.
+            $paid = isset($creditResult['result']) && $creditResult['result'] === 'success';
+            return ['result' => $paid ? 'success' : 'unpaid', 'invoiceid' => $invoiceId, 'credit_result' => $creditResult];
         } catch (Exception $e) {
             logActivity('createAndPayHourlyInvoice error: ' . $e->getMessage());
             return ['result' => 'error', 'message' => $e->getMessage()];

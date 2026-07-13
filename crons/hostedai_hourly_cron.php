@@ -88,6 +88,7 @@ try {
         // idempotency check below (double-billing the same clock hour). API errors also
         // skip the balance check since we can't know the post-billing balance in that case.
         $skipBalanceCheck = false;
+        $walletInsufficient = false; // set when the wallet can't cover this hour's charge
         $shouldBill = ($teamHelper !== null);
 
         if (!$teamHelper) {
@@ -230,10 +231,15 @@ try {
                     $summary      = "Hourly usage — {$hourLabel} — Team {$team->teamid}";
                     $deductResult = $helper->createAndPayHourlyInvoice($team->uid, $totalCost, $summary, $lineItems);
 
-                    if ($deductResult['result'] !== 'success') {
-                        logActivity("Hourly cron: Deduction failed for TeamID {$team->teamid}: " . json_encode($deductResult));
-                    } else {
+                    if ($deductResult['result'] === 'success') {
                         logActivity("Hourly cron: Deducted \${$totalCost} from UID {$team->uid}, invoice #{$deductResult['invoiceid']}");
+                    } elseif ($deductResult['result'] === 'insufficient') {
+                        // Wallet can't cover this hour → suspend below (prepaid, no grace).
+                        // No invoice was created, so no unpayable debt accrues.
+                        $walletInsufficient = true;
+                        logActivity("Hourly cron: TeamID {$team->teamid} — wallet \${$deductResult['balance']} can't cover \${$deductResult['required']}; will suspend (insufficient funds)");
+                    } else {
+                        logActivity("Hourly cron: Deduction not paid for TeamID {$team->teamid}: " . json_encode($deductResult));
                     }
                 } else {
                     logActivity("Hourly cron: TeamID {$team->teamid} — zero usage this hour, no invoice");
@@ -270,13 +276,20 @@ try {
                     }
                 }
 
-                if ($balance <= $minBalance && $currentReason !== 'balance_zero') {
+                // Suspend when the wallet can no longer sustain the service: either it
+                // couldn't cover this hour's charge (insufficient funds — the common case,
+                // since an hourly charge is normally far above the min-balance floor), or
+                // the balance has drained to/below the floor. Prepaid has no day-based grace.
+                if (($walletInsufficient || $balance <= $minBalance) && $currentReason !== 'balance_zero') {
                     $helper->suspendTerminate_service($team->sid, $team->pid, 'ModuleSuspend');
                     Capsule::table('mod_hostdaiteam_details')
                         ->where('sid', $team->sid)
                         ->update(['suspended_reason' => 'balance_zero', 'updated_at' => date('Y-m-d H:i:s')]);
-                    logActivity("Hourly cron: Suspended service {$team->sid} (TeamID {$team->teamid}) — balance \${$balance} ≤ threshold \${$minBalance}");
-                } elseif ($balance > $minBalance && $balance <= $minBalance * 2) {
+                    $why = $walletInsufficient
+                        ? "wallet \${$balance} cannot cover the hourly charge"
+                        : "balance \${$balance} ≤ threshold \${$minBalance}";
+                    logActivity("Hourly cron: Suspended service {$team->sid} (TeamID {$team->teamid}) — {$why}");
+                } elseif (!$walletInsufficient && $balance > $minBalance && $balance <= $minBalance * 2) {
                     // Low balance warning — send at most once per 24 hours
                     $lastNotified = $team->low_balance_notified_at ?? null;
                     $hoursSince   = $lastNotified ? (time() - strtotime($lastNotified)) / 3600 : 999;
