@@ -136,7 +136,11 @@ class Helper
     public function getTeamMembers($teamid)
     {
         try {
-            $endPoint = 'team/' . $teamid . '/members?page=1&itemsPerPage=50';
+            // page=0 is the first page on both 2.4.1 and 2.4.2 (paging went zero-based in
+            // 2.4.2 — see API Changelogs 2.4.2, "Team Member Paging Is Now Zero-Based").
+            // page=1 still returns HTTP 200 on 2.4.2, but with an empty members list for
+            // any team with itemsPerPage or fewer members — silently, no error.
+            $endPoint = 'team/' . $teamid . '/members?page=0&itemsPerPage=50';
             $curlResponse = $this->curlCall("GET", "getTeamMembers", $endPoint, '');
 
             return $curlResponse;

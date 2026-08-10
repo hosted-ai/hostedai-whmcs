@@ -6,6 +6,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Team members list no longer silently empties out** — `Helper::getTeamMembers()` requested `page=1`, the old 1-based first page. The platform's team-members pagination is now 0-based (page=0 is first); `page=1` still returns HTTP 200 but with `members: null` for any team with itemsPerPage (50) or fewer members, so the client-area member table went blank with no error. Switched to `page=0`, which returns the first page under both the old and new pagination scheme.
+
 ## [2.4.3] - 2026-07-11
 
 ### Fixed
